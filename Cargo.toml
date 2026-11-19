@@ -1,8 +1,9 @@
 [package]
-name    = "git-remote-refs"
-version = "0.1.0"
-edition = "2024"
-publish = false
+name        = "git-remote-refs"
+version     = "0.1.0"
+edition     = "2024"
+description = "I/O-free, no_std Rust library for listing refs and fetching objects over Git smart HTTP."
+publish     = false
 
 [dependencies]
 miniz_oxide = { version = "0.9.1", default-features = false, features = ["with-alloc"] }
