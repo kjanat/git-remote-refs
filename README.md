@@ -5,17 +5,19 @@ Read refs from Git smart HTTP protocol v0. Public repositories that allow anonym
 Build with the Rust target `wasm32-unknown-unknown`, wasm-bindgen-cli 0.2.130, and `npm run build`.
 
 ```js
-import { init, listRefs, parseAdvertisement } from "./index.js";
+import { init, listRefs, parseAdvertisement } from './index.js';
 
 // Node or Deno with node:fs support
-import { readFile } from "node:fs/promises";
-await init({ module_or_path: await readFile(new URL("./wasm/git_remote_refs_bg.wasm", import.meta.url)) });
+import { readFile } from 'node:fs/promises';
+await init({
+  module_or_path: await readFile(new URL('./wasm/git_remote_refs_bg.wasm', import.meta.url)),
+});
 
-const remote = await listRefs("https://github.com/denoland/setup-deno.git", { fetch });
-console.log(remote.refs.get("refs/heads/main"));
-console.log(remote.symrefs.get("HEAD"));
+const remote = await listRefs('https://github.com/denoland/setup-deno.git', { fetch });
+console.log(remote.refs.get('refs/heads/main'));
+console.log(remote.symrefs.get('HEAD'));
 
-const saved = parseAdvertisement(await readFile("denoland-setup-deno-git-upload-pack.txt"));
+const saved = parseAdvertisement(await readFile('denoland-setup-deno-git-upload-pack.txt'));
 console.log(saved.refs.size);
 ```
 

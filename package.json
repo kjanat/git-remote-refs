@@ -1,17 +1,24 @@
 {
-  "name": "git-remote-refs",
-  "version": "0.1.0",
-  "private": true,
-  "files": ["index.js", "index.d.ts", "wasm/"],
-  "type": "module",
-  "types": "./index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./index.d.ts",
-      "default": "./index.js"
-    }
-  },
-  "scripts": {
-    "build": "cargo build --release --target wasm32-unknown-unknown && wasm-bindgen --target web --out-dir wasm target/wasm32-unknown-unknown/release/git_remote_refs.wasm"
-  }
+	"name": "git-remote-refs",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./index.d.ts",
+			"default": "./index.js"
+		}
+	},
+	"types": "./index.d.ts",
+	"files": ["index.js", "index.d.ts", "wasm/"],
+	"scripts": {
+		"build": "mise run build",
+		"prepare": "mise i"
+	},
+	"devEngines": {
+		"packageManager": {
+			"name": "npm",
+			"onFail": "ignore"
+		}
+	}
 }

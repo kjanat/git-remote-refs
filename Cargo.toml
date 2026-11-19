@@ -1,12 +1,12 @@
 [package]
-name = "git-remote-refs"
+name    = "git-remote-refs"
 version = "0.1.0"
 edition = "2024"
 publish = false
 
 [lib]
-crate-type = ["rlib", "cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys       = "=0.3.107"
 wasm-bindgen = "=0.2.130"
-js-sys = "=0.3.107"
