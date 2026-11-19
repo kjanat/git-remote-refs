@@ -71,6 +71,11 @@ export type GitObject =
     | { kind: 'tree'; oid: string; entries: TreeEntry[] }
     | { kind: 'blob'; oid: string; data: Uint8Array };
 
+export interface Fetched {
+    wanted: [GitObject, ...GitObject[]];
+    objects: Map<string, GitObject>;
+}
+
 export interface GitRequest {
     method: 'GET' | 'POST';
     url: string;
@@ -246,6 +251,9 @@ fn response<'a>(status: u16, content_type: Option<&'a str>, body: &'a [u8]) -> R
 }
 
 fn object_ids(oids: &[String]) -> Result<Vec<ObjectId>, JsValue> {
+    if oids.is_empty() {
+        return Err(error(Error::InvalidObjectId));
+    }
     oids.iter().map(|oid| oid.parse().map_err(error)).collect()
 }
 
@@ -351,7 +359,7 @@ impl JsRemote {
         )
     }
 
-    #[wasm_bindgen(js_name = acceptFetch, unchecked_return_type = "Map<string, GitObject>")]
+    #[wasm_bindgen(js_name = acceptFetch, unchecked_return_type = "Fetched")]
     pub fn accept_fetch(
         &self,
         status: u16,
@@ -371,7 +379,14 @@ impl JsRemote {
         for (oid, parsed) in &objects {
             map.set(&oid.to_hex().into(), &object(oid, parsed)?);
         }
-        Ok(map.into())
+        let wanted: Array = wants
+            .iter()
+            .map(|want| map.get(&want.to_hex().into()))
+            .collect();
+        let value = JsObject::new();
+        set(&value, "wanted", wanted)?;
+        set(&value, "objects", map)?;
+        Ok(value.into())
     }
 
     fn capabilities(&self) -> Result<&Capabilities, JsValue> {

@@ -39,4 +39,4 @@ The `git-remote-refs` crate is `no_std` with `alloc` and performs no I/O. `Remot
 
 ## Development
 
-`mise run build` compiles `bindings/wasm` into `wasm/`. `mise run test` runs the Rust and JavaScript suites against local repositories served by `git http-backend`.
+`mise run build` compiles `bindings/wasm` into `wasm/`, then compiles `index.ts` with tsrs into `index.js` and `index.d.ts`. `mise run test` runs the Rust and JavaScript suites against local repositories served by `git http-backend`.

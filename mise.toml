@@ -6,6 +6,7 @@ node                               = "26"
 cargo-binstall                     = "1.23.0"
 "github:wasm-bindgen/wasm-bindgen" = "0.2.130"
 "cargo:cargo-nextest"              = "0.9.152"
+"npm:tsrs"                         = "7.1.0-beta.tsrs3"
 "npm:@kjanat/fmt"                  = {
   version               = "0.64.1",
   trust_policy_excludes = ["@kprint/*", "@kjanat/*"],
@@ -29,6 +30,11 @@ depends = "build"
 run  = "cargo build --package git-remote-refs-wasm --profile {{vars.profile}} --target {{vars.target}}"
 hide = true
 
-[tasks.build]
+[tasks."wasm-bindgen:build"]
 run     = "wasm-bindgen --target web --out-dir {{vars.outdir}} target/{{vars.target}}/{{vars.profile}}/git_remote_refs_wasm.wasm"
 depends = "cargo:build"
+hide    = true
+
+[tasks.build]
+run     = "tsrs --project tsconfig.json"
+depends = "wasm-bindgen:build"

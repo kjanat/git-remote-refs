@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { deflateSync } from 'node:zlib';
 import { getObject, getRef, listRefs, parseAdvertisement, peel, resolve } from './index.js';
 
 const root = fileURLToPath(new URL('./target/js-fixtures', import.meta.url));
@@ -133,7 +135,13 @@ test('non-UTF-8 text keeps its original bytes', async () => {
 });
 
 test('peel follows nested tags to their target', async () => {
-	const { chain, target } = await peel(repo('sha1'), rev('sha1', 'nested'), { fetch });
+	let requests = 0;
+	const counting = async (url, init) => {
+		requests += 1;
+		return fetch(url, init);
+	};
+	const { chain, target } = await peel(repo('sha1'), rev('sha1', 'nested'), { fetch: counting });
+	assert.equal(requests, 2);
 	assert.deepEqual(
 		chain.map(object => object.oid),
 		[rev('sha1', 'nested'), rev('sha1', 'annotated'), rev('sha1', 'main')],
@@ -141,6 +149,37 @@ test('peel follows nested tags to their target', async () => {
 	assert.equal(target.kind, 'commit');
 	const tree = await peel(repo('sha1'), rev('sha1', 'tree-tag'), { fetch });
 	assert.equal(tree.target.kind, 'tree');
+	requests = 0;
+	let served = false;
+	const tagOnly = async (url, init) => {
+		if (served || init.method !== 'POST' || !new TextDecoder().decode(init.body).includes('command=fetch')) {
+			return counting(url, init);
+		}
+		served = true;
+		requests += 1;
+		const raw = execFileSync('git', ['-C', `${root}/sha1.git`, 'cat-file', 'tag', 'annotated'], { env: environment });
+		const header = [0x80 | (4 << 4) | (raw.length & 15)];
+		for (let rest = raw.length >> 4; rest > 0; rest >>= 7) header.push((rest & 0x7f) | (rest > 0x7f ? 0x80 : 0));
+		const body = Buffer.concat([
+			Buffer.from('PACK\0\0\0\x02\0\0\0\x01', 'latin1'),
+			Buffer.from(header),
+			deflateSync(raw),
+		]);
+		const pack = Buffer.concat([body, createHash('sha1').update(body).digest()]);
+		const line = data => Buffer.concat([Buffer.from((data.length + 4).toString(16).padStart(4, '0')), data]);
+		const response = Buffer.concat([
+			line(Buffer.from('packfile\n')),
+			line(Buffer.concat([Buffer.from([1]), pack])),
+			Buffer.from('0000'),
+		]);
+		return new Response(response, { headers: { 'content-type': 'application/x-git-upload-pack-result' } });
+	};
+	const split = await peel(repo('sha1'), rev('sha1', 'annotated'), { fetch: tagOnly });
+	assert.deepEqual(
+		split.chain.map(object => object.oid),
+		[rev('sha1', 'annotated'), rev('sha1', 'main')],
+	);
+	assert.equal(requests, 3);
 	const longest = await peel(repo('deep'), rev('deep', 't14'), { fetch });
 	assert.equal(longest.chain.length, 16);
 	await assert.rejects(peel(repo('deep'), rev('deep', 't16'), { fetch }), { code: 'limit-exceeded' });
@@ -191,6 +230,8 @@ test('the Wasm Remote refuses work before discovery', async () => {
 		assert.throws(() => remote.refs(), { code: 'protocol' });
 		assert.throws(() => remote.listRequest([]), { code: 'protocol' });
 		assert.throws(() => remote.fetchRequest(['1'.repeat(40)]), { code: 'protocol' });
+		assert.throws(() => remote.fetchRequest([]), { code: 'invalid-object-id' });
+		assert.throws(() => remote.acceptFetch(200, null, new Uint8Array(), []), { code: 'invalid-object-id' });
 	} finally {
 		remote.free();
 	}

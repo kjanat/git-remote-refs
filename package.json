@@ -9,11 +9,18 @@
 			"default": "./index.js"
 		}
 	},
-	"files": ["index.js", "index.d.ts", "wasm/"],
+	"files": [
+		"index.js",
+		"index.d.ts",
+		"wasm/"
+	],
 	"scripts": {
 		"build": "mise run build",
 		"prepack": "mise run build",
 		"prepare": "mise i"
+	},
+	"devDependencies": {
+		"@types/node": "26.6.6"
 	},
 	"devEngines": {
 		"packageManager": {

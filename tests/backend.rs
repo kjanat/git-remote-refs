@@ -388,3 +388,22 @@ fn keeps_non_utf8_bytes_and_commit_encoding() {
     };
     assert_eq!(entries[0].name, b"caf\xe9");
 }
+
+#[test]
+fn packs_without_the_wanted_object_are_rejected() {
+    let capabilities = capabilities("sha1");
+    let main = rev("sha1", "main");
+    let parent = rev("sha1", "main~1");
+    let request = remote("sha1")
+        .fetch_request(&capabilities, &[parent])
+        .unwrap();
+    assert_eq!(
+        parse_fetch(
+            &capabilities,
+            &exchange(&request, true).response(),
+            &[main],
+            &Limits::default(),
+        ),
+        Err(Error::MissingObject(main))
+    );
+}
