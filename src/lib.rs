@@ -87,7 +87,17 @@ mod wasm {
         Ok(std::str::from_utf8(bytes)?.into())
     }
 
-    #[wasm_bindgen(js_name = parseAdvertisement)]
+    #[wasm_bindgen(typescript_custom_section)]
+    const ADVERTISEMENT: &str = r#"
+export interface Advertisement {
+    /** Advertised ref name to object ID, including peeled tag entries. */
+    refs: Map<string, string>;
+    /** Symbolic ref name to target ref name. */
+    symrefs: Map<string, string>;
+}
+"#;
+
+    #[wasm_bindgen(js_name = parseAdvertisement, unchecked_return_type = "Advertisement")]
     pub fn parse(bytes: &[u8]) -> Result<Object, JsError> {
         let parsed = super::parse_advertisement(bytes).map_err(JsError::new)?;
         let refs = Map::new();
