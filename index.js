@@ -1,6 +1,26 @@
-import init, { parseAdvertisement } from './wasm/git_remote_refs.js';
+import initWasm, { parseAdvertisement } from './wasm/git_remote_refs.js';
 
-export { init, parseAdvertisement };
+export { parseAdvertisement };
+
+let initialization;
+
+async function loadWasm(input) {
+	if (input !== undefined) return initWasm(input);
+	const url = new URL('./wasm/git_remote_refs_bg.wasm', import.meta.url);
+	if (url.protocol === 'file:' && globalThis.process?.versions?.node) {
+		const { readFile } = await import('node:fs/promises');
+		return initWasm({ module_or_path: await readFile(url) });
+	}
+	return initWasm({ module_or_path: url });
+}
+
+export function init(input) {
+	initialization ??= loadWasm(input).catch(error => {
+		initialization = undefined;
+		throw error;
+	});
+	return initialization;
+}
 
 export async function listRefs(repository, { fetch = globalThis.fetch, signal } = {}) {
 	const url = new URL(repository);
@@ -15,5 +35,6 @@ export async function listRefs(repository, { fetch = globalThis.fetch, signal } 
 	if (response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== type) {
 		throw new Error('Expected a Git upload-pack advertisement');
 	}
+	await init();
 	return parseAdvertisement(new Uint8Array(await response.arrayBuffer()));
 }
