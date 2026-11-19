@@ -1,4 +1,4 @@
-import init, { parseAdvertisement } from "./wasm/git_pkt_line.js";
+import init, { parseAdvertisement } from "./wasm/git_remote_refs.js";
 
 export { init, parseAdvertisement };
 

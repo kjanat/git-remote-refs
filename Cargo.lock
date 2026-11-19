@@ -39,7 +39,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "git-pkt-line"
+name = "git-remote-refs"
 version = "0.1.0"
 dependencies = [
  "js-sys",
