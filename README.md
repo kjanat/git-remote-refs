@@ -2,7 +2,7 @@
 
 Read refs from Git smart HTTP protocol v0. Public repositories that allow anonymous Git reads need one GET. The Rust function `parse_advertisement(&[u8])` accepts the full response body and preserves ref names as bytes. The JS bindings expose UTF-8 names as strings and throw on invalid UTF-8.
 
-Build with the Rust target `wasm32-unknown-unknown`, wasm-bindgen-cli 0.2.128, and `npm run build`.
+Build with the Rust target `wasm32-unknown-unknown`, wasm-bindgen-cli 0.2.130, and `npm run build`.
 
 ```js
 import { init, listRefs, parseAdvertisement } from "./index.js";

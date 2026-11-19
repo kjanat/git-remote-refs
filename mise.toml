@@ -1,4 +1,5 @@
 [tools]
+"github:wasm-bindgen/wasm-bindgen" = "0.2.130"
 "cargo:cargo-nextest" = "latest"
 "npm:@kjanat/fmt" = { version = "latest", trust_policy_excludes = "*" }
 "npm:@kprint/kprint" = { version = "latest", minimum_release_age = "0s", trust_policy_excludes = ["@kprint/*", "@kjanat/*"], allow_low_downloads = "true", auto_update = true }
