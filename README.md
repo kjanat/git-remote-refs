@@ -1,15 +1,42 @@
 # git-remote-refs
 
-List a remote Git repository’s advertised refs by URL. Public repositories that allow anonymous Git reads need one smart-HTTP GET.
+Read refs and objects from any Git smart HTTP server without credentials, the way `git ls-remote` and `git fetch` do. Works with GitHub, GitLab, Gitea, Forgejo and self-hosted Git.
 
 ```js
-import { listRefs } from 'git-remote-refs';
+import { getObject, resolve } from 'git-remote-refs';
 
-const { refs, symrefs } = await listRefs('https://github.com/denoland/setup-deno.git');
-console.log(symrefs.get('HEAD')); // refs/heads/main
-console.log(refs.get('refs/heads/main')); // object ID
+const repo = 'https://github.com/denoland/setup-deno.git';
+const v2 = await resolve(repo, 'v2');
+// { kind: 'ref', name: 'refs/heads/v2', ref: { oid: '22d081ff…' }, others: [] }
+const commit = await getObject(repo, v2.ref.oid);
+// { kind: 'commit', tree, parents, author, committer, message, … }
 ```
 
-`listRefs` loads the bundled Wasm automatically. Pass `{ fetch, signal }` as the second argument to supply your own HTTP transport or cancel a request. In a browser, serve the generated `wasm/` directory alongside `index.js`. The Git endpoint must permit cross-origin reads or be served through your own origin.
+## JavaScript API
 
-To build from source, run `npm run build` with rustup and mise available.
+| Function                       | Result                                                                                                                                                                        |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `listRefs(repo, { prefixes })` | `RefList`: every advertised ref with `oid`, `peeled` and `symrefTarget`, unborn symrefs, and the `prefixes` the listing covers (`null` for all refs).                         |
+| `getRef(repo, name)`           | The ref with exactly this full name, or `undefined`.                                                                                                                          |
+| `resolve(repo, name)`          | Git's `rev-parse` lookup order: `name`, `refs/name`, `refs/tags/name`, `refs/heads/name`, `refs/remotes/name`, `refs/remotes/name/HEAD`. A full object ID resolves to itself. |
+| `getObject(repo, oid)`         | A commit, tag, tree or blob whose bytes hash to `oid`.                                                                                                                        |
+| `peel(repo, oid)`              | The tag chain from `oid` to its first non-tag object, up to 16 objects.                                                                                                       |
+| `parseAdvertisement(bytes)`    | A `RefList` from saved `info/refs` bytes.                                                                                                                                     |
+
+`resolve` returns `{ kind: 'ref', name, ref, others }`, where `others` lists the lower-priority refs with the same short name. It returns `{ kind: 'object', oid, refs }` for a full object ID, and `{ kind: 'not-found' }` otherwise. Revision syntax such as `v2^{}` fails with `invalid-ref-name`, and an abbreviated object ID is looked up as a ref name.
+
+Every function takes `{ fetch, signal }` to supply an HTTP transport or cancel requests. Errors carry a `code` such as `not-found`, `auth-required`, `not-smart-http`, `unsupported-feature` or `remote`, and HTTP errors carry `status`. GitHub answers `401` for repositories that do not exist.
+
+Text in names, emails and messages is decoded as UTF-8. When the bytes are not valid UTF-8, the object also carries the original bytes in `nameBytes`, `emailBytes` or `messageBytes`, and commits report their `encoding` header.
+
+Listing refs takes one request on protocol v0 servers and two on protocol v2 servers. With `prefixes`, a v2 server sends only matching refs. Objects need protocol v2 with shallow fetch. Servers with partial clone filters send only the requested object; the rest send its whole snapshot.
+
+In a browser, serve the generated `wasm/` directory alongside `index.js`, and route requests through an origin that permits cross-origin reads.
+
+## Rust crate
+
+The `git-remote-refs` crate is `no_std` with `alloc` and performs no I/O. `Remote` builds each `Request`, the caller sends it, and `parse_discovery`, `parse_ls_refs` and `parse_fetch` read the `Response`. `resolve` and `candidates` implement the lookup order over a `RefList`. `Limits` bounds object count and size.
+
+## Development
+
+`mise run build` compiles `bindings/wasm` into `wasm/`. `mise run test` runs the Rust and JavaScript suites against local repositories served by `git http-backend`.
