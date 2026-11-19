@@ -29,7 +29,9 @@ Every function takes `{ fetch, signal }` to supply an HTTP transport or cancel r
 
 Text in names, emails and messages is decoded as UTF-8. When the bytes are not valid UTF-8, the object also carries the original bytes in `nameBytes`, `emailBytes` or `messageBytes`, and commits report their `encoding` header.
 
-Listing refs takes one request on protocol v0 servers and two on protocol v2 servers. With `prefixes`, a v2 server sends only matching refs. Objects need protocol v2 with shallow fetch. Servers with partial clone filters send only the requested object; the rest send its whole snapshot.
+Listing refs takes one request on protocol v0 servers and two on protocol v2 servers. With `prefixes`, a v2 server sends only matching refs. Objects need protocol v2 with shallow fetch. Servers with partial clone filters send the requested objects and the objects their tags point to. Other servers send the whole snapshot.
+
+`getObject` proves that the server has an object with that ID. GitHub serves objects from a repository's whole fork network, so `getObject` can return a commit that exists only in a fork. To show that a commit is part of the repository, find a branch or tag whose history reaches it.
 
 In a browser, serve the generated `wasm/` directory alongside `index.js`, and route requests through an origin that permits cross-origin reads.
 
