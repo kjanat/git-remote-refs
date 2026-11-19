@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root=$(realpath --canonicalize-missing "$1")
-export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ADVICE=0
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ADVICE=0 GIT_TERMINAL_PROMPT=0
 export GIT_AUTHOR_NAME='Ada Lovelace' GIT_AUTHOR_EMAIL=ada@example.com
 export GIT_COMMITTER_NAME='Ada Lovelace' GIT_COMMITTER_EMAIL=ada@example.com
 export GIT_AUTHOR_DATE='2026-01-02T03:04:05+02:00' GIT_COMMITTER_DATE='2026-01-02T03:04:05+02:00'

@@ -49,14 +49,21 @@ impl Reply {
     }
 }
 
+fn git() -> Command {
+    let mut command = Command::new("git");
+    command
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_TERMINAL_PROMPT", "0");
+    command
+}
+
 fn exchange(request: &Request, v2: bool) -> Reply {
     let rest = request.url.strip_prefix("http://fixtures").unwrap();
     let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
-    let mut command = Command::new("git");
+    let mut command = git();
     command
         .arg("http-backend")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_PROJECT_ROOT", root())
         .env("GIT_HTTP_EXPORT_ALL", "1")
         .env("PATH_INFO", path)
@@ -146,7 +153,7 @@ fn fetch(name: &str, wants: &[ObjectId]) -> Result<BTreeMap<ObjectId, Object>, E
 }
 
 fn rev(name: &str, revision: &str) -> ObjectId {
-    let output = Command::new("git")
+    let output = git()
         .args([
             "-C",
             &root().join(format!("{name}.git")).to_string_lossy(),

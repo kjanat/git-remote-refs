@@ -5,7 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { getObject, getRef, listRefs, parseAdvertisement, peel, resolve } from './index.js';
 
 const root = fileURLToPath(new URL('./target/js-fixtures', import.meta.url));
-const environment = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
+const environment = {
+	...process.env,
+	GIT_CONFIG_NOSYSTEM: '1',
+	GIT_CONFIG_GLOBAL: '/dev/null',
+	GIT_TERMINAL_PROMPT: '0',
+};
 
 before(() => {
 	execFileSync(fileURLToPath(new URL('./tests/fixture.sh', import.meta.url)), [root], { stdio: 'inherit' });
