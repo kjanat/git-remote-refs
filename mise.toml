@@ -8,15 +8,8 @@ cargo-binstall                     = "1.23.0"
 "cargo:cargo-nextest"              = "0.9.152"
 "npm:@kjanat/fmt"                  = {
   version               = "0.64.1",
-  trust_policy_excludes = "*",
-  auto_update           = true,
-}
-"npm:@kprint/kprint"               = {
-  version               = "0.64.1",
-  minimum_release_age   = "0s",
   trust_policy_excludes = ["@kprint/*", "@kjanat/*"],
-  allow_low_downloads   = "true",
-  auto_update           = true,
+  allow_low_downloads   = true,
 }
 
 [vars]
@@ -28,20 +21,13 @@ outdir  = "wasm"
 alias = ["f", "format"]
 run   = "kfmt"
 
-[tasks."wasm-bindgen:build"]
-run     = "wasm-bindgen --target web --out-dir {{vars.outdir}} target/{{vars.target}}/{{vars.profile}}/git_remote_refs.wasm"
-depends = "cargo:build"
-hide    = true
-outputs = ["{{vars.outdir}}"]
+[tasks.test]
+run = "cargo nextest run"
 
 [tasks."cargo:build"]
-run     = "cargo build --profile {{vars.profile}} --target {{vars.target}}"
-hide    = true
-outputs = ["target/{{vars.target}}/{{vars.profile}}/git_remote_refs.wasm"]
+run  = "cargo build --profile {{vars.profile}} --target {{vars.target}}"
+hide = true
 
 [tasks.build]
-run = [
-  { task = "cargo:build" },
-  { task = "wasm-bindgen:build" },
-  { task = "fmt" },
-]
+run     = "wasm-bindgen --target web --out-dir {{vars.outdir}} target/{{vars.target}}/{{vars.profile}}/git_remote_refs.wasm"
+depends = "cargo:build"

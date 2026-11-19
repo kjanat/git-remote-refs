@@ -9,10 +9,10 @@
 			"default": "./index.js"
 		}
 	},
-	"types": "./index.d.ts",
 	"files": ["index.js", "index.d.ts", "wasm/"],
 	"scripts": {
 		"build": "mise run build",
+		"prepack": "mise run build",
 		"prepare": "mise i"
 	},
 	"devEngines": {

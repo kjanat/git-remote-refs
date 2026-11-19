@@ -12,4 +12,4 @@ console.log(refs.get('refs/heads/main')); // object ID
 
 `listRefs` loads the bundled Wasm automatically. Pass `{ fetch, signal }` as the second argument to supply your own HTTP transport or cancel a request. In a browser, serve the generated `wasm/` directory alongside `index.js`. The Git endpoint must permit cross-origin reads or be served through your own origin.
 
-To build from source, install the Rust target `wasm32-unknown-unknown` and run `npm run build` with mise available.
+To build from source, run `npm run build` with rustup and mise available.
