@@ -97,22 +97,32 @@ fn packfile(body: &[u8]) -> Result<Vec<u8>, Error> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fetched {
+    pub wanted: Vec<(ObjectId, Object)>,
+    pub objects: BTreeMap<ObjectId, Object>,
+}
+
 pub fn parse_fetch(
     capabilities: &Capabilities,
     response: &Response,
     wants: &[ObjectId],
     limits: &Limits,
-) -> Result<BTreeMap<ObjectId, Object>, Error> {
+) -> Result<Fetched, Error> {
     let format = capabilities.object_format();
     let pack = packfile(http::body(response, RESULT)?)?;
     let mut objects = BTreeMap::new();
     for (id, (kind, data)) in pack::parse(format, &pack, limits)? {
         objects.insert(id, Object::parse(format, kind, &data)?);
     }
-    if let Some(missing) = wants.iter().find(|want| !objects.contains_key(*want)) {
-        return Err(Error::MissingObject(*missing));
-    }
-    Ok(objects)
+    let wanted = wants
+        .iter()
+        .map(|want| match objects.get(want) {
+            Some(object) => Ok((*want, object.clone())),
+            None => Err(Error::MissingObject(*want)),
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(Fetched { wanted, objects })
 }
 
 #[cfg(test)]

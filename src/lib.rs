@@ -16,7 +16,7 @@ mod resolve;
 
 pub use discovery::{Capabilities, Discovery, parse_advertisement, parse_discovery};
 pub use error::Error;
-pub use fetch::parse_fetch;
+pub use fetch::{Fetched, parse_fetch};
 pub use http::{Method, Remote, Request, Response};
 pub use object::{Commit, Kind, Object, Signature, Tag, TreeEntry, object_id};
 pub use oid::{ObjectFormat, ObjectId};

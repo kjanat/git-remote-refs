@@ -1,249 +1,349 @@
-use git_remote_refs::{
-    Capabilities, Discovery, Error, Limits, Object, ObjectId, Ref, RefList, Remote as Core,
-    Request, Resolution, Response, Signature,
-};
-use js_sys::{Array, Map, Object as JsObject, Reflect, Uint8Array};
+use git_remote_refs as git;
+use git_remote_refs::{Capabilities, Discovery, Error, Limits, ObjectId};
+use js_sys::Reflect;
+use serde::Serialize;
+use serde_bytes::ByteBuf;
+use std::collections::BTreeMap;
+use tsify::{Ts, Tsify};
 use wasm_bindgen::prelude::*;
 
-#[wasm_bindgen(typescript_custom_section)]
-const TYPES: &str = r#"
-export type ObjectFormat = 'sha1' | 'sha256';
-export type ObjectKind = 'commit' | 'tree' | 'blob' | 'tag';
-
-export interface Ref {
-    oid: string;
-    peeled?: string;
-    symrefTarget?: string;
+#[derive(Serialize, Tsify)]
+#[serde(rename_all = "lowercase")]
+pub enum ObjectFormat {
+    Sha1,
+    Sha256,
 }
 
-export interface RefList {
-    objectFormat: ObjectFormat;
-    refs: Map<string, Ref>;
-    unborn: Map<string, string>;
-    prefixes: string[] | null;
+#[derive(Serialize, Tsify)]
+#[serde(rename_all = "lowercase")]
+pub enum ObjectKind {
+    Commit,
+    Tree,
+    Blob,
+    Tag,
 }
 
-export type Resolution =
-    | { kind: 'ref'; name: string; ref: Ref; others: string[] }
-    | { kind: 'object'; oid: string; refs: string[] }
-    | { kind: 'not-found' }
-    | { kind: 'incomplete'; missing: string[] };
-
-export interface Signature {
-    name: string;
-    nameBytes?: Uint8Array;
-    email: string;
-    emailBytes?: Uint8Array;
-    time: number;
-    offsetMinutes: number;
+#[derive(Serialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+pub struct Ref {
+    oid: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
+    peeled: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
+    symref_target: Option<String>,
 }
 
-export interface TreeEntry {
-    mode: number;
-    name: string;
-    nameBytes?: Uint8Array;
-    oid: string;
+#[derive(Serialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+#[tsify(missing_as_null)]
+pub struct RefList {
+    object_format: ObjectFormat,
+    refs: BTreeMap<String, Ref>,
+    unborn: BTreeMap<String, String>,
+    prefixes: Option<Vec<String>>,
 }
 
-export type GitObject =
-    | {
-        kind: 'commit';
-        oid: string;
-        tree: string;
-        parents: string[];
-        author: Signature;
-        committer: Signature;
-        encoding?: string;
-        message: string;
-        messageBytes?: Uint8Array;
-    }
-    | {
-        kind: 'tag';
-        oid: string;
-        target: string;
-        targetKind: ObjectKind;
-        name: string;
-        nameBytes?: Uint8Array;
-        tagger?: Signature;
-        message: string;
-        messageBytes?: Uint8Array;
-    }
-    | { kind: 'tree'; oid: string; entries: TreeEntry[] }
-    | { kind: 'blob'; oid: string; data: Uint8Array };
-
-export interface Fetched {
-    wanted: [GitObject, ...GitObject[]];
-    objects: Map<string, GitObject>;
+#[derive(Serialize, Tsify)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Resolution {
+    Ref {
+        name: String,
+        #[serde(rename = "ref")]
+        target: Ref,
+        others: Vec<String>,
+    },
+    Object {
+        oid: String,
+        refs: Vec<String>,
+    },
+    NotFound,
+    Incomplete {
+        missing: Vec<String>,
+    },
 }
 
-export interface GitRequest {
-    method: 'GET' | 'POST';
-    url: string;
-    headers: Record<string, string>;
-    body?: Uint8Array;
+#[derive(Serialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+pub struct Signature {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "Uint8Array")]
+    name_bytes: Option<ByteBuf>,
+    email: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "Uint8Array")]
+    email_bytes: Option<ByteBuf>,
+    time: i64,
+    offset_minutes: i32,
 }
-"#;
 
-fn set(target: &JsObject, key: &str, value: impl Into<JsValue>) -> Result<(), JsValue> {
-    Reflect::set(target, &key.into(), &value.into()).map(drop)
+#[derive(Serialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+pub struct TreeEntry {
+    mode: u32,
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "Uint8Array")]
+    name_bytes: Option<ByteBuf>,
+    oid: String,
+}
+
+#[derive(Serialize, Tsify)]
+#[serde(
+    tag = "kind",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
+pub enum GitObject {
+    Commit {
+        oid: String,
+        tree: String,
+        parents: Vec<String>,
+        author: Signature,
+        committer: Signature,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[tsify(optional)]
+        encoding: Option<String>,
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[tsify(optional, type = "Uint8Array")]
+        message_bytes: Option<ByteBuf>,
+    },
+    Tag {
+        oid: String,
+        target: String,
+        target_kind: ObjectKind,
+        name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[tsify(optional, type = "Uint8Array")]
+        name_bytes: Option<ByteBuf>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[tsify(optional)]
+        tagger: Option<Signature>,
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[tsify(optional, type = "Uint8Array")]
+        message_bytes: Option<ByteBuf>,
+    },
+    Tree {
+        oid: String,
+        entries: Vec<TreeEntry>,
+    },
+    Blob {
+        oid: String,
+        #[tsify(type = "Uint8Array")]
+        data: ByteBuf,
+    },
+}
+
+#[derive(Serialize, Tsify)]
+pub struct Fetched {
+    #[tsify(type = "[GitObject, ...GitObject[]]")]
+    wanted: Vec<GitObject>,
+    objects: BTreeMap<String, GitObject>,
+}
+
+#[derive(Serialize, Tsify)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Method {
+    Get,
+    Post,
+}
+
+#[derive(Serialize, Tsify)]
+pub struct GitRequest {
+    method: Method,
+    url: String,
+    headers: Vec<(String, String)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "Uint8Array")]
+    body: Option<ByteBuf>,
 }
 
 fn error(error: Error) -> JsValue {
     let value = js_sys::Error::new(&error.to_string());
-    let mut result = set(&value, "code", error.code());
+    let mut result = Reflect::set(&value, &"code".into(), &error.code().into());
     if let Some(status) = error.status() {
-        result = result.and_then(|()| set(&value, "status", status));
+        result = result.and_then(|_| Reflect::set(&value, &"status".into(), &status.into()));
     }
     match result {
-        Ok(()) => value.into(),
+        Ok(_) => value.into(),
         Err(failure) => failure,
     }
 }
 
-fn set_text(target: &JsObject, key: &str, bytes: &[u8]) -> Result<(), JsValue> {
+fn ts<T: Tsify + Serialize>(value: &T) -> Result<Ts<T>, JsValue> {
+    value
+        .into_ts()
+        .map_err(|failure| JsError::from(failure).into())
+}
+
+fn text(bytes: &[u8]) -> (String, Option<ByteBuf>) {
     match std::str::from_utf8(bytes) {
-        Ok(text) => set(target, key, text),
-        Err(_) => {
-            set(target, key, String::from_utf8_lossy(bytes).as_ref())?;
-            set(target, &format!("{key}Bytes"), Uint8Array::from(bytes))
+        Ok(text) => (text.into(), None),
+        Err(_) => (
+            String::from_utf8_lossy(bytes).into_owned(),
+            Some(ByteBuf::from(bytes)),
+        ),
+    }
+}
+
+fn hex(oids: &[ObjectId]) -> Vec<String> {
+    oids.iter().map(ObjectId::to_hex).collect()
+}
+
+impl From<git::Request> for GitRequest {
+    fn from(request: git::Request) -> Self {
+        Self {
+            method: match request.method {
+                git::Method::Get => Method::Get,
+                git::Method::Post => Method::Post,
+            },
+            url: request.url,
+            headers: request
+                .headers
+                .into_iter()
+                .map(|(name, value)| (name.into(), value.into()))
+                .collect(),
+            body: (!request.body.is_empty()).then(|| ByteBuf::from(request.body)),
         }
     }
 }
 
-fn strings(values: impl IntoIterator<Item = String>) -> Array {
-    values.into_iter().map(JsValue::from).collect()
-}
-
-fn request(request: Request) -> Result<JsValue, JsValue> {
-    let value = JsObject::new();
-    set(&value, "method", request.method.as_str())?;
-    set(&value, "url", request.url)?;
-    let headers = JsObject::new();
-    for (name, header) in request.headers {
-        set(&headers, name, header)?;
-    }
-    set(&value, "headers", headers)?;
-    if !request.body.is_empty() {
-        set(&value, "body", Uint8Array::from(request.body.as_slice()))?;
-    }
-    Ok(value.into())
-}
-
-fn reference(entry: &Ref) -> Result<JsObject, JsValue> {
-    let value = JsObject::new();
-    set(&value, "oid", entry.oid.to_hex())?;
-    if let Some(peeled) = &entry.peeled {
-        set(&value, "peeled", peeled.to_hex())?;
-    }
-    if let Some(target) = &entry.symref_target {
-        set(&value, "symrefTarget", target.as_str())?;
-    }
-    Ok(value)
-}
-
-fn ref_list(list: &RefList) -> Result<JsValue, JsValue> {
-    let value = JsObject::new();
-    set(&value, "objectFormat", list.format.name())?;
-    let refs = Map::new();
-    for (name, entry) in &list.refs {
-        refs.set(&name.into(), &reference(entry)?.into());
-    }
-    set(&value, "refs", refs)?;
-    let unborn = Map::new();
-    for (name, target) in &list.unborn {
-        unborn.set(&name.into(), &target.into());
-    }
-    set(&value, "unborn", unborn)?;
-    let prefixes = match &list.prefixes {
-        Some(prefixes) => strings(prefixes.iter().cloned()).into(),
-        None => JsValue::NULL,
-    };
-    set(&value, "prefixes", prefixes)?;
-    Ok(value.into())
-}
-
-fn signature(signature: &Signature) -> Result<JsObject, JsValue> {
-    let value = JsObject::new();
-    set_text(&value, "name", &signature.name)?;
-    set_text(&value, "email", &signature.email)?;
-    set(&value, "time", signature.time as f64)?;
-    set(&value, "offsetMinutes", signature.offset_minutes)?;
-    Ok(value)
-}
-
-fn object(oid: &ObjectId, object: &Object) -> Result<JsValue, JsValue> {
-    let value = JsObject::new();
-    set(&value, "kind", object.kind().name())?;
-    set(&value, "oid", oid.to_hex())?;
-    match object {
-        Object::Commit(commit) => {
-            set(&value, "tree", commit.tree.to_hex())?;
-            set(
-                &value,
-                "parents",
-                strings(commit.parents.iter().map(ObjectId::to_hex)),
-            )?;
-            set(&value, "author", signature(&commit.author)?)?;
-            set(&value, "committer", signature(&commit.committer)?)?;
-            if let Some(encoding) = &commit.encoding {
-                set_text(&value, "encoding", encoding)?;
-            }
-            set_text(&value, "message", &commit.message)?;
+impl From<&git::Ref> for Ref {
+    fn from(entry: &git::Ref) -> Self {
+        Self {
+            oid: entry.oid.to_hex(),
+            peeled: entry.peeled.as_ref().map(ObjectId::to_hex),
+            symref_target: entry.symref_target.clone(),
         }
-        Object::Tag(tag) => {
-            set(&value, "target", tag.target.to_hex())?;
-            set(&value, "targetKind", tag.target_kind.name())?;
-            set_text(&value, "name", &tag.name)?;
-            if let Some(tagger) = &tag.tagger {
-                set(&value, "tagger", signature(tagger)?)?;
-            }
-            set_text(&value, "message", &tag.message)?;
-        }
-        Object::Tree(entries) => {
-            let list = Array::new();
-            for entry in entries {
-                let item = JsObject::new();
-                set(&item, "mode", entry.mode)?;
-                set_text(&item, "name", &entry.name)?;
-                set(&item, "oid", entry.oid.to_hex())?;
-                list.push(&item);
-            }
-            set(&value, "entries", list)?;
-        }
-        Object::Blob(data) => set(&value, "data", Uint8Array::from(data.as_slice()))?,
     }
-    Ok(value.into())
 }
 
-fn resolution(resolution: Resolution) -> Result<JsValue, JsValue> {
-    let value = JsObject::new();
-    match resolution {
-        Resolution::Ref {
+impl From<&git::RefList> for RefList {
+    fn from(list: &git::RefList) -> Self {
+        Self {
+            object_format: match list.format {
+                git::ObjectFormat::Sha1 => ObjectFormat::Sha1,
+                git::ObjectFormat::Sha256 => ObjectFormat::Sha256,
+            },
+            refs: list
+                .refs
+                .iter()
+                .map(|(name, entry)| (name.clone(), entry.into()))
+                .collect(),
+            unborn: list.unborn.clone(),
+            prefixes: list.prefixes.clone(),
+        }
+    }
+}
+
+impl From<git::Resolution> for Resolution {
+    fn from(resolution: git::Resolution) -> Self {
+        match resolution {
+            git::Resolution::Ref {
+                name,
+                target,
+                others,
+            } => Self::Ref {
+                name,
+                target: (&target).into(),
+                others,
+            },
+            git::Resolution::Object { oid, refs } => Self::Object {
+                oid: oid.to_hex(),
+                refs,
+            },
+            git::Resolution::NotFound => Self::NotFound,
+            git::Resolution::Incomplete { missing } => Self::Incomplete { missing },
+        }
+    }
+}
+
+impl From<git::Kind> for ObjectKind {
+    fn from(kind: git::Kind) -> Self {
+        match kind {
+            git::Kind::Commit => Self::Commit,
+            git::Kind::Tree => Self::Tree,
+            git::Kind::Blob => Self::Blob,
+            git::Kind::Tag => Self::Tag,
+        }
+    }
+}
+
+impl From<&git::Signature> for Signature {
+    fn from(signature: &git::Signature) -> Self {
+        let (name, name_bytes) = text(&signature.name);
+        let (email, email_bytes) = text(&signature.email);
+        Self {
             name,
-            target,
-            others,
-        } => {
-            set(&value, "kind", "ref")?;
-            set(&value, "name", name)?;
-            set(&value, "ref", reference(&target)?)?;
-            set(&value, "others", strings(others))?;
-        }
-        Resolution::Object { oid, refs } => {
-            set(&value, "kind", "object")?;
-            set(&value, "oid", oid.to_hex())?;
-            set(&value, "refs", strings(refs))?;
-        }
-        Resolution::NotFound => set(&value, "kind", "not-found")?,
-        Resolution::Incomplete { missing } => {
-            set(&value, "kind", "incomplete")?;
-            set(&value, "missing", strings(missing))?;
+            name_bytes,
+            email,
+            email_bytes,
+            time: signature.time,
+            offset_minutes: signature.offset_minutes,
         }
     }
-    Ok(value.into())
 }
 
-fn response<'a>(status: u16, content_type: Option<&'a str>, body: &'a [u8]) -> Response<'a> {
-    Response {
+impl GitObject {
+    fn new(oid: &ObjectId, object: &git::Object) -> Self {
+        let oid = oid.to_hex();
+        match object {
+            git::Object::Commit(commit) => {
+                let (message, message_bytes) = text(&commit.message);
+                Self::Commit {
+                    oid,
+                    tree: commit.tree.to_hex(),
+                    parents: hex(&commit.parents),
+                    author: (&commit.author).into(),
+                    committer: (&commit.committer).into(),
+                    encoding: commit.encoding.as_deref().map(|encoding| text(encoding).0),
+                    message,
+                    message_bytes,
+                }
+            }
+            git::Object::Tag(tag) => {
+                let (name, name_bytes) = text(&tag.name);
+                let (message, message_bytes) = text(&tag.message);
+                Self::Tag {
+                    oid,
+                    target: tag.target.to_hex(),
+                    target_kind: tag.target_kind.into(),
+                    name,
+                    name_bytes,
+                    tagger: tag.tagger.as_ref().map(Into::into),
+                    message,
+                    message_bytes,
+                }
+            }
+            git::Object::Tree(entries) => Self::Tree {
+                oid,
+                entries: entries
+                    .iter()
+                    .map(|entry| {
+                        let (name, name_bytes) = text(&entry.name);
+                        TreeEntry {
+                            mode: entry.mode,
+                            name,
+                            name_bytes,
+                            oid: entry.oid.to_hex(),
+                        }
+                    })
+                    .collect(),
+            },
+            git::Object::Blob(data) => Self::Blob {
+                oid,
+                data: ByteBuf::from(data.as_slice()),
+            },
+        }
+    }
+}
+
+fn response<'a>(status: u16, content_type: Option<&'a str>, body: &'a [u8]) -> git::Response<'a> {
+    git::Response {
         status,
         content_type,
         body,
@@ -263,9 +363,9 @@ fn not_ready() -> JsValue {
 
 #[wasm_bindgen(js_name = Remote)]
 pub struct JsRemote {
-    remote: Core,
+    remote: git::Remote,
     discovery: Option<Discovery>,
-    list: Option<RefList>,
+    list: Option<git::RefList>,
     prefixes: Vec<String>,
 }
 
@@ -274,16 +374,16 @@ impl JsRemote {
     #[wasm_bindgen(constructor)]
     pub fn new(url: &str) -> Result<JsRemote, JsValue> {
         Ok(Self {
-            remote: Core::new(url).map_err(error)?,
+            remote: git::Remote::new(url).map_err(error)?,
             discovery: None,
             list: None,
             prefixes: Vec::new(),
         })
     }
 
-    #[wasm_bindgen(js_name = discoveryRequest, unchecked_return_type = "GitRequest")]
-    pub fn discovery_request(&self) -> Result<JsValue, JsValue> {
-        request(self.remote.discovery_request())
+    #[wasm_bindgen(js_name = discoveryRequest)]
+    pub fn discovery_request(&self) -> Result<Ts<GitRequest>, JsValue> {
+        ts(&self.remote.discovery_request().into())
     }
 
     #[wasm_bindgen(js_name = acceptDiscovery)]
@@ -293,20 +393,22 @@ impl JsRemote {
         content_type: Option<String>,
         body: &[u8],
     ) -> Result<(), JsValue> {
-        let discovery =
-            git_remote_refs::parse_discovery(&response(status, content_type.as_deref(), body))
-                .map_err(error)?;
+        let discovery = git::parse_discovery(&response(status, content_type.as_deref(), body))
+            .map_err(error)?;
         self.discovery = Some(discovery);
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = listRequest, unchecked_return_type = "GitRequest | undefined")]
-    pub fn list_request(&mut self, prefixes: Vec<String>) -> Result<JsValue, JsValue> {
+    #[wasm_bindgen(js_name = listRequest)]
+    pub fn list_request(
+        &mut self,
+        prefixes: Vec<String>,
+    ) -> Result<Option<Ts<GitRequest>>, JsValue> {
         let borrowed: Vec<&str> = prefixes.iter().map(String::as_str).collect();
         match self.discovery.as_ref().ok_or_else(not_ready)? {
             Discovery::V0(list) => {
                 self.list = Some(list.clone().restrict(&borrowed).map_err(error)?);
-                Ok(JsValue::UNDEFINED)
+                Ok(None)
             }
             Discovery::V2(capabilities) => {
                 let pending = self
@@ -314,7 +416,7 @@ impl JsRemote {
                     .ls_refs_request(capabilities, &borrowed)
                     .map_err(error)?;
                 self.prefixes = prefixes;
-                request(pending)
+                ts(&GitRequest::from(pending)).map(Some)
             }
         }
     }
@@ -328,7 +430,7 @@ impl JsRemote {
     ) -> Result<(), JsValue> {
         let capabilities = self.capabilities()?;
         let prefixes: Vec<&str> = self.prefixes.iter().map(String::as_str).collect();
-        let list = git_remote_refs::parse_ls_refs(
+        let list = git::parse_ls_refs(
             capabilities,
             &response(status, content_type.as_deref(), body),
             &prefixes,
@@ -338,55 +440,53 @@ impl JsRemote {
         Ok(())
     }
 
-    #[wasm_bindgen(unchecked_return_type = "RefList")]
-    pub fn refs(&self) -> Result<JsValue, JsValue> {
-        ref_list(self.list.as_ref().ok_or_else(not_ready)?)
+    pub fn refs(&self) -> Result<Ts<RefList>, JsValue> {
+        ts(&RefList::from(self.list.as_ref().ok_or_else(not_ready)?))
     }
 
-    #[wasm_bindgen(unchecked_return_type = "Resolution")]
-    pub fn resolve(&self, name: &str) -> Result<JsValue, JsValue> {
+    pub fn resolve(&self, name: &str) -> Result<Ts<Resolution>, JsValue> {
         let list = self.list.as_ref().ok_or_else(not_ready)?;
-        resolution(git_remote_refs::resolve(list, name).map_err(error)?)
+        ts(&Resolution::from(git::resolve(list, name).map_err(error)?))
     }
 
-    #[wasm_bindgen(js_name = fetchRequest, unchecked_return_type = "GitRequest")]
-    pub fn fetch_request(&self, oids: Vec<String>) -> Result<JsValue, JsValue> {
+    #[wasm_bindgen(js_name = fetchRequest)]
+    pub fn fetch_request(&self, oids: Vec<String>) -> Result<Ts<GitRequest>, JsValue> {
         let wants = object_ids(&oids)?;
-        request(
-            self.remote
-                .fetch_request(self.capabilities()?, &wants)
-                .map_err(error)?,
-        )
+        let request = self
+            .remote
+            .fetch_request(self.capabilities()?, &wants)
+            .map_err(error)?;
+        ts(&GitRequest::from(request))
     }
 
-    #[wasm_bindgen(js_name = acceptFetch, unchecked_return_type = "Fetched")]
+    #[wasm_bindgen(js_name = acceptFetch)]
     pub fn accept_fetch(
         &self,
         status: u16,
         content_type: Option<String>,
         body: &[u8],
         oids: Vec<String>,
-    ) -> Result<JsValue, JsValue> {
+    ) -> Result<Ts<Fetched>, JsValue> {
         let wants = object_ids(&oids)?;
-        let objects = git_remote_refs::parse_fetch(
+        let fetched = git::parse_fetch(
             self.capabilities()?,
             &response(status, content_type.as_deref(), body),
             &wants,
             &Limits::default(),
         )
         .map_err(error)?;
-        let map = Map::new();
-        for (oid, parsed) in &objects {
-            map.set(&oid.to_hex().into(), &object(oid, parsed)?);
-        }
-        let wanted: Array = wants
-            .iter()
-            .map(|want| map.get(&want.to_hex().into()))
-            .collect();
-        let value = JsObject::new();
-        set(&value, "wanted", wanted)?;
-        set(&value, "objects", map)?;
-        Ok(value.into())
+        ts(&Fetched {
+            wanted: fetched
+                .wanted
+                .iter()
+                .map(|(oid, object)| GitObject::new(oid, object))
+                .collect(),
+            objects: fetched
+                .objects
+                .iter()
+                .map(|(oid, object)| (oid.to_hex(), GitObject::new(oid, object)))
+                .collect(),
+        })
     }
 
     fn capabilities(&self) -> Result<&Capabilities, JsValue> {
@@ -400,12 +500,14 @@ impl JsRemote {
 #[wasm_bindgen]
 pub fn candidates(name: &str) -> Result<Vec<String>, JsValue> {
     if ObjectId::from_hex(name.as_bytes()).is_none() {
-        git_remote_refs::check_ref_name(name).map_err(error)?;
+        git::check_ref_name(name).map_err(error)?;
     }
-    Ok(git_remote_refs::candidates(name))
+    Ok(git::candidates(name))
 }
 
-#[wasm_bindgen(js_name = parseAdvertisement, unchecked_return_type = "RefList")]
-pub fn parse_advertisement(bytes: &[u8]) -> Result<JsValue, JsValue> {
-    ref_list(&git_remote_refs::parse_advertisement(bytes).map_err(error)?)
+#[wasm_bindgen(js_name = parseAdvertisement)]
+pub fn parse_advertisement(bytes: &[u8]) -> Result<Ts<RefList>, JsValue> {
+    ts(&RefList::from(
+        &git::parse_advertisement(bytes).map_err(error)?,
+    ))
 }

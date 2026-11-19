@@ -14,6 +14,7 @@ export type {
 	Fetched,
 	GitObject,
 	GitRequest,
+	Method,
 	ObjectFormat,
 	ObjectKind,
 	Ref,

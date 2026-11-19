@@ -1,6 +1,6 @@
 use git_remote_refs::{
-    Capabilities, Discovery, Error, Kind, Limits, Object, ObjectFormat, ObjectId, RefList, Remote,
-    Request, Resolution, Response, parse_discovery, parse_fetch, parse_ls_refs, resolve,
+    Capabilities, Discovery, Error, Fetched, Kind, Limits, Object, ObjectFormat, ObjectId, RefList,
+    Remote, Request, Resolution, Response, parse_discovery, parse_fetch, parse_ls_refs, resolve,
 };
 use std::{
     collections::BTreeMap,
@@ -141,7 +141,7 @@ fn list(name: &str, prefixes: &[&str]) -> RefList {
     .unwrap()
 }
 
-fn fetch(name: &str, wants: &[ObjectId]) -> Result<BTreeMap<ObjectId, Object>, Error> {
+fn fetched(name: &str, wants: &[ObjectId]) -> Result<Fetched, Error> {
     let capabilities = capabilities(name);
     let request = remote(name).fetch_request(&capabilities, wants)?;
     parse_fetch(
@@ -150,6 +150,10 @@ fn fetch(name: &str, wants: &[ObjectId]) -> Result<BTreeMap<ObjectId, Object>, E
         wants,
         &Limits::default(),
     )
+}
+
+fn fetch(name: &str, wants: &[ObjectId]) -> Result<BTreeMap<ObjectId, Object>, Error> {
+    fetched(name, wants).map(|fetched| fetched.objects)
 }
 
 fn rev(name: &str, revision: &str) -> ObjectId {
@@ -288,9 +292,15 @@ fn fetches_tags_trees_and_blobs() {
 
     let file = rev("sha1", "main:file");
     let empty = rev("sha1", "main:empty");
-    let blobs = fetch("sha1", &[file, empty]).unwrap();
-    assert_eq!(blobs[&file], Object::Blob(b"one\n".to_vec()));
-    assert_eq!(blobs[&empty], Object::Blob(Vec::new()));
+    let blobs = fetched("sha1", &[empty, file]).unwrap();
+    assert_eq!(
+        blobs.wanted,
+        [
+            (empty, Object::Blob(Vec::new())),
+            (file, Object::Blob(b"one\n".to_vec())),
+        ]
+    );
+    assert_eq!(blobs.objects.len(), 2);
 }
 
 #[test]
