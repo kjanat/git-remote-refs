@@ -11,8 +11,10 @@
 		"noImplicitOverride": true,
 		"verbatimModuleSyntax": true,
 		"isolatedModules": true,
+		"erasableSyntaxOnly": true,
 		"declaration": true,
+		"noEmit": true,
 		"skipLibCheck": false
 	},
-	"files": ["index.ts"]
+	"files": ["index.ts", "index.test.ts"]
 }

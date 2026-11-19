@@ -4,7 +4,10 @@ import { createHash } from 'node:crypto';
 import { before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
+import type { RemoteOptions } from './index.js';
 import { getObject, getRef, listRefs, parseAdvertisement, peel, resolve } from './index.js';
+
+type Fetch = NonNullable<RemoteOptions['fetch']>;
 
 const root = fileURLToPath(new URL('./target/js-fixtures', import.meta.url));
 const environment = {
@@ -18,11 +21,17 @@ before(() => {
 	execFileSync(fileURLToPath(new URL('./tests/fixture.sh', import.meta.url)), [root], { stdio: 'inherit' });
 });
 
-function backend({ v2 = true } = {}) {
+function bytes(body: RequestInit['body']): Uint8Array {
+	return body instanceof Uint8Array ? body : new Uint8Array();
+}
+
+function backend({ v2 = true }: { v2?: boolean } = {}): Fetch {
 	return async (url, init) => {
 		const { pathname, search } = new URL(url);
-		const body = init.body ?? new Uint8Array();
-		const headers = init.headers;
+		const body = bytes(init.body);
+		const headers = new Headers(init.headers);
+		const contentType = headers.get('Content-Type');
+		const protocol = headers.get('Git-Protocol');
 		const result = spawnSync('git', ['http-backend'], {
 			input: body,
 			env: {
@@ -31,27 +40,29 @@ function backend({ v2 = true } = {}) {
 				GIT_HTTP_EXPORT_ALL: '1',
 				PATH_INFO: pathname,
 				QUERY_STRING: search.slice(1),
-				REQUEST_METHOD: init.method,
+				REQUEST_METHOD: init.method ?? 'GET',
 				CONTENT_LENGTH: String(body.length),
-				...(headers['Content-Type'] ? { CONTENT_TYPE: headers['Content-Type'] } : {}),
-				...(v2 && headers['Git-Protocol'] ? { HTTP_GIT_PROTOCOL: headers['Git-Protocol'] } : {}),
+				...(contentType === null ? {} : { CONTENT_TYPE: contentType }),
+				...(v2 && protocol !== null ? { HTTP_GIT_PROTOCOL: protocol } : {}),
 			},
 		});
 		const split = result.stdout.indexOf('\r\n\r\n');
 		let status = 200;
 		const responseHeaders = new Headers();
 		for (const line of result.stdout.subarray(0, split).toString().split('\r\n')) {
-			const [name, value] = line.split(': ');
+			const separator = line.indexOf(': ');
+			const name = line.slice(0, separator);
+			const value = line.slice(separator + 2);
 			if (name.toLowerCase() === 'status') status = Number(value.slice(0, 3));
 			else responseHeaders.set(name, value);
 		}
-		return new Response(result.stdout.subarray(split + 4), { status, headers: responseHeaders });
+		return new Response(new Uint8Array(result.stdout.subarray(split + 4)), { status, headers: responseHeaders });
 	};
 }
 
 const fetch = backend();
-const repo = name => `http://fixtures/${name}.git`;
-const rev = (name, revision) =>
+const repo = (name: string) => `http://fixtures/${name}.git`;
+const rev = (name: string, revision: string) =>
 	execFileSync('git', ['-C', `${root}/${name}.git`, 'rev-parse', revision], { env: environment }).toString().trim();
 
 test('listRefs returns refs with peeled tags, symrefs and coverage', async () => {
@@ -80,7 +91,7 @@ test('protocol v0 servers return the same listing', async () => {
 });
 
 test('getRef looks up the exact name', async () => {
-	assert.equal((await getRef(repo('sha1'), 'refs/heads/heads/x', { fetch })).oid, rev('sha1', 'refs/heads/heads/x'));
+	assert.equal((await getRef(repo('sha1'), 'refs/heads/heads/x', { fetch }))?.oid, rev('sha1', 'refs/heads/heads/x'));
 	assert.equal(await getRef(repo('sha1'), 'heads/x', { fetch }), undefined);
 });
 
@@ -91,7 +102,9 @@ test('resolve follows Git order and reports other matches', async () => {
 		ref: { oid: rev('sha1', 'refs/tags/v2') },
 		others: ['refs/heads/v2'],
 	});
-	assert.equal((await resolve(repo('sha1'), 'heads/x', { fetch })).name, 'refs/heads/x');
+	const literal = await resolve(repo('sha1'), 'heads/x', { fetch });
+	assert(literal.kind === 'ref');
+	assert.equal(literal.name, 'refs/heads/x');
 	assert.deepEqual(await resolve(repo('sha1'), rev('sha1', 'main'), { fetch }), {
 		kind: 'object',
 		oid: rev('sha1', 'main'),
@@ -103,7 +116,7 @@ test('resolve follows Git order and reports other matches', async () => {
 
 test('getObject returns verified commits', async () => {
 	const commit = await getObject(repo('sha1'), rev('sha1', 'main').toUpperCase(), { fetch });
-	assert.equal(commit.kind, 'commit');
+	assert(commit.kind === 'commit');
 	assert.equal(commit.oid, rev('sha1', 'main'));
 	assert.equal(commit.tree, rev('sha1', 'main^{tree}'));
 	assert.deepEqual(commit.parents, [rev('sha1', 'main~1')]);
@@ -117,6 +130,7 @@ test('getObject returns verified commits', async () => {
 	const blob = await getObject(repo('sha1'), rev('sha1', 'main:file'), { fetch });
 	assert.deepEqual(blob, { kind: 'blob', oid: rev('sha1', 'main:file'), data: new TextEncoder().encode('one\n') });
 	const tree = await getObject(repo('sha256'), rev('sha256', 'main^{tree}'), { fetch });
+	assert(tree.kind === 'tree');
 	assert.deepEqual(
 		tree.entries.map(entry => entry.name),
 		['empty', 'file', 'numbers', 'numbers-changed'],
@@ -125,18 +139,20 @@ test('getObject returns verified commits', async () => {
 
 test('non-UTF-8 text keeps its original bytes', async () => {
 	const commit = await getObject(repo('latin1'), rev('latin1', 'main'), { fetch });
+	assert(commit.kind === 'commit');
 	assert.equal(commit.encoding, 'ISO-8859-1');
 	assert.equal(commit.message, 'Caf�\n');
 	assert.deepEqual(commit.messageBytes, new Uint8Array([0x43, 0x61, 0x66, 0xe9, 0x0a]));
 	assert.deepEqual(commit.author.nameBytes, new Uint8Array([0xc9, 0x6d, 0x69, 0x6c, 0x65]));
 	assert.equal(commit.committer.nameBytes, undefined);
 	const tree = await getObject(repo('latin1'), commit.tree, { fetch });
-	assert.deepEqual(tree.entries[0].nameBytes, new Uint8Array([0x63, 0x61, 0x66, 0xe9]));
+	assert(tree.kind === 'tree');
+	assert.deepEqual(tree.entries[0]?.nameBytes, new Uint8Array([0x63, 0x61, 0x66, 0xe9]));
 });
 
 test('peel follows nested tags to their target', async () => {
 	let requests = 0;
-	const counting = async (url, init) => {
+	const counting: Fetch = async (url, init) => {
 		requests += 1;
 		return fetch(url, init);
 	};
@@ -151,8 +167,8 @@ test('peel follows nested tags to their target', async () => {
 	assert.equal(tree.target.kind, 'tree');
 	requests = 0;
 	let served = false;
-	const tagOnly = async (url, init) => {
-		if (served || init.method !== 'POST' || !new TextDecoder().decode(init.body).includes('command=fetch')) {
+	const tagOnly: Fetch = async (url, init) => {
+		if (served || init.method !== 'POST' || !new TextDecoder().decode(bytes(init.body)).includes('command=fetch')) {
 			return counting(url, init);
 		}
 		served = true;
@@ -166,13 +182,15 @@ test('peel follows nested tags to their target', async () => {
 			deflateSync(raw),
 		]);
 		const pack = Buffer.concat([body, createHash('sha1').update(body).digest()]);
-		const line = data => Buffer.concat([Buffer.from((data.length + 4).toString(16).padStart(4, '0')), data]);
+		const line = (data: Buffer) => Buffer.concat([Buffer.from((data.length + 4).toString(16).padStart(4, '0')), data]);
 		const response = Buffer.concat([
 			line(Buffer.from('packfile\n')),
 			line(Buffer.concat([Buffer.from([1]), pack])),
 			Buffer.from('0000'),
 		]);
-		return new Response(response, { headers: { 'content-type': 'application/x-git-upload-pack-result' } });
+		return new Response(new Uint8Array(response), {
+			headers: { 'content-type': 'application/x-git-upload-pack-result' },
+		});
 	};
 	const split = await peel(repo('sha1'), rev('sha1', 'annotated'), { fetch: tagOnly });
 	assert.deepEqual(
@@ -187,16 +205,16 @@ test('peel follows nested tags to their target', async () => {
 
 test('requests carry the caller signal', async () => {
 	const controller = new AbortController();
-	const seen = [];
-	const watching = async (url, init) => {
+	const seen: Array<AbortSignal | null | undefined> = [];
+	const watching: Fetch = async (url, init) => {
 		seen.push(init.signal);
 		return fetch(url, init);
 	};
 	await listRefs(repo('sha1'), { fetch: watching, signal: controller.signal });
 	assert.deepEqual(seen, [controller.signal, controller.signal]);
 	controller.abort();
-	const aborting = async (url, init) => {
-		init.signal.throwIfAborted();
+	const aborting: Fetch = async (url, init) => {
+		init.signal?.throwIfAborted();
 		return fetch(url, init);
 	};
 	await assert.rejects(listRefs(repo('sha1'), { fetch: aborting, signal: controller.signal }), {
@@ -210,7 +228,7 @@ test('errors carry codes and statuses', async () => {
 	await assert.rejects(listRefs(repo('sha1'), { fetch, prefixes: ['a b'] }), { code: 'invalid-prefix' });
 	await assert.rejects(getObject(repo('sha1'), 'abc', { fetch }), { code: 'invalid-object-id' });
 	await assert.rejects(getObject(repo('sha1'), '1'.repeat(40), { fetch }), { code: 'remote' });
-	const html = async () => new Response('<html>', { headers: { 'content-type': 'text/html' } });
+	const html: Fetch = async () => new Response('<html>', { headers: { 'content-type': 'text/html' } });
 	await assert.rejects(listRefs(repo('sha1'), { fetch: html }), { code: 'not-smart-http' });
 });
 
@@ -220,7 +238,7 @@ test('parseAdvertisement reads a saved v0 advertisement', async () => {
 		headers: {},
 	});
 	const list = parseAdvertisement(new Uint8Array(await response.arrayBuffer()));
-	assert.equal(list.refs.get('refs/heads/main').oid, rev('sha1', 'main'));
+	assert.equal(list.refs.get('refs/heads/main')?.oid, rev('sha1', 'main'));
 });
 
 test('the Wasm Remote refuses work before discovery', async () => {

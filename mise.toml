@@ -23,7 +23,11 @@ alias = ["f", "format"]
 run   = "kfmt"
 
 [tasks.test]
-run     = ["cargo nextest run --workspace", "node --test index.test.js"]
+run     = [
+  "tsrs --project tsconfig.json",
+  "cargo nextest run --workspace",
+  "node --test index.test.ts",
+]
 depends = "build"
 
 [tasks."cargo:build"]
@@ -36,5 +40,5 @@ depends = "cargo:build"
 hide    = true
 
 [tasks.build]
-run     = "tsrs --project tsconfig.json"
+run     = "tsrs --project tsconfig.build.json"
 depends = "wasm-bindgen:build"
