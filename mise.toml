@@ -1,5 +1,8 @@
 #:tombi toml-version = "v1.1.0"
 
+[settings]
+idiomatic_version_file_enable_tools = []
+
 [tools]
 npm                                = "12"
 node                               = "26"
