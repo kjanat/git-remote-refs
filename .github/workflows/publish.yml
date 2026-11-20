@@ -125,7 +125,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || fromJSON(steps.credentials.outputs.values || '{}')['crates-io'] }}
 
       - name: Report publication
-        if: ${{ !cancelled() }}
+        if: always()
         uses: kjanat/beepboop/actions/report@v1
         with:
           execution-id: ${{ steps.beepboop.outputs.execution-id }}
@@ -136,7 +136,7 @@ jobs:
               "name": "git-remote-refs",
               "version": "${{ needs.package.outputs.version }}",
               "required": true,
-              "outcome": "${{ steps.publish.outcome == 'success' && 'succeeded' || 'failed' }}"
+              "outcome": "${{ steps.publish.outcome == 'success' && 'succeeded' || steps.publish.outcome == 'cancelled' && 'uncertain' || steps.publish.outcome == 'skipped' && 'skipped' || 'failed' }}"
             }]
 
   npm:
@@ -190,7 +190,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ fromJSON(steps.credentials.outputs.values)['npm-token'] }}
 
       - name: Report publication
-        if: ${{ !cancelled() }}
+        if: always()
         uses: kjanat/beepboop/actions/report@v1
         with:
           execution-id: ${{ steps.beepboop.outputs.execution-id }}
@@ -201,7 +201,7 @@ jobs:
               "name": "git-remote-refs",
               "version": "${{ needs.package.outputs.version }}",
               "required": true,
-              "outcome": "${{ (steps.oidc.outcome == 'success' || steps.token.outcome == 'success') && 'succeeded' || 'failed' }}"
+              "outcome": "${{ (steps.oidc.outcome == 'success' || steps.token.outcome == 'success') && 'succeeded' || (steps.oidc.outcome == 'cancelled' || steps.token.outcome == 'cancelled') && 'uncertain' || steps.oidc.outcome == 'skipped' && 'skipped' || 'failed' }}"
             }]
 
   release:
