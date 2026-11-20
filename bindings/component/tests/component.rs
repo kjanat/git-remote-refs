@@ -16,10 +16,7 @@ wasmtime::component::bindgen!({
     additional_derives: [PartialEq],
 });
 
-const COMPONENT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../component/git-remote-refs.wasm"
-);
+const COMPONENT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../go/git-remote-refs.wasm");
 
 fn engine() -> &'static Engine {
     static ENGINE: OnceLock<Engine> = OnceLock::new();

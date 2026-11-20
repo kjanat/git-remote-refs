@@ -43,6 +43,19 @@ The `git-remote-refs` crate is `no_std` with `alloc` and performs no I/O. `Remot
 
 `bindings/component` exports the same `Remote` API as a WebAssembly component. Its interface is `kjanat:git-remote-refs/git` in `bindings/component/wit/world.wit`. The component imports nothing, so the host sends each request and passes the response back. Errors are the `error` variant, and maps are lists of name and value pairs.
 
+## Go module
+
+```go
+import gitremoterefs "github.com/kjanat/git-remote-refs/go"
+
+client, err := gitremoterefs.New(ctx, http.DefaultClient)
+defer client.Close(ctx)
+resolution, err := client.Resolve(ctx, "https://github.com/denoland/setup-deno.git", "v2")
+// &gitremoterefs.RefMatch{Name: "refs/tags/v2", Ref: gitremoterefs.Ref{OID: "22d081ff…"}}
+```
+
+The `go` module embeds the component and runs it in pure Go on wacogo and wazero. `Client` offers `ListRefs`, `GetRef`, `Resolve`, `GetObject`, `Peel` and `ParseAdvertisement` with the same semantics as the JavaScript API, and sends requests through the `http.Client` it was given. A `RefList` has nil `Prefixes` when it covers every ref. Names, emails and messages hold the raw bytes from the object. Failures from the Git protocol are `*gitremoterefs.Error` values with a `Code`, an HTTP `Status` where one applies, and a `Detail`.
+
 ## Development
 
-`mise run build` compiles `bindings/wasm` into `wasm/`, then compiles `index.ts` with tsrs into `index.js` and `index.d.ts`. `mise run component:build` writes the component to `component/git-remote-refs.wasm`. `mise run test` runs the Rust, component and JavaScript suites against local repositories served by `git http-backend`.
+`mise run build` compiles `bindings/wasm` into `wasm/`, then compiles `index.ts` with tsrs into `index.js` and `index.d.ts`. `mise run component:build` writes the component to `go/git-remote-refs.wasm`, and `mise run go:generate` regenerates the Go bindings from the WIT. `mise run test` runs the Rust, component, JavaScript and Go suites against local repositories served by `git http-backend`.

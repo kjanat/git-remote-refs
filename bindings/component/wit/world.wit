@@ -159,3 +159,7 @@ interface git {
 world git-remote-refs {
     export git;
 }
+
+world host {
+    import git;
+}
