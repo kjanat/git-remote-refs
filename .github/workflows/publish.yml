@@ -25,6 +25,7 @@ jobs:
     env:
       MISE_ENABLE_TOOLS: node,npm,github:wasm-bindgen/wasm-bindgen,npm:tsrs
     outputs:
+      version: ${{ steps.version.outputs.version }}
       npm-tag: ${{ steps.version.outputs.npm-tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -46,6 +47,7 @@ jobs:
             echo "::error::Expected tag v$version and Cargo version $version; got $GITHUB_REF and $crate_version"
             exit 1
           fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           case "${version%%+*}" in
             *-*) echo "npm-tag=next" >> "$GITHUB_OUTPUT" ;;
             *)   echo "npm-tag=latest" >> "$GITHUB_OUTPUT" ;;
@@ -70,10 +72,28 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
-  crates-io:
-    name: Publish to crates.io
+  beepboop:
+    name: Register the release with Beepboop
     if: github.event_name == 'release' || inputs.publish
     needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      execution-id: ${{ steps.begin.outputs.execution-id }}
+    steps:
+      - uses: kjanat/beepboop/actions/begin@9a3412ef38f10908c2402dccc47fa8ad5a4deb9d # v1
+        id: begin
+        with:
+          stream: git-remote-refs
+          operation: publish
+          version: ${{ needs.package.outputs.version }}
+
+  crates-io:
+    name: Publish to crates.io
+    needs: [package, beepboop]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: crates-io
@@ -88,18 +108,54 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
+      - name: Check whether the crate exists
+        id: registry
+        run: |
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --user-agent "$GITHUB_REPOSITORY publish workflow" \
+            https://crates.io/api/v1/crates/git-remote-refs)
+          case "$status" in
+            200) echo "first=false" >> "$GITHUB_OUTPUT" ;;
+            404) echo "first=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::crates.io answered HTTP $status"; exit 1 ;;
+          esac
+
+      # crates.io trusted publishing needs a published crate. Its first version uses an API token.
+      - uses: kjanat/beepboop/actions/credentials@9a3412ef38f10908c2402dccc47fa8ad5a4deb9d # v1
+        id: credentials
+        if: steps.registry.outputs.first == 'true'
+        with:
+          execution-id: ${{ needs.beepboop.outputs.execution-id }}
+          aliases: '["crates-io"]'
+
       - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
         id: auth
+        if: steps.registry.outputs.first == 'false'
 
       - name: Publish Rust crate
+        id: publish
         run: cargo publish --locked --no-verify -p git-remote-refs
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || fromJSON(steps.credentials.outputs.values || '{}')['crates-io'] }}
+
+      - name: Report publication
+        if: ${{ !cancelled() }}
+        uses: kjanat/beepboop/actions/report@9a3412ef38f10908c2402dccc47fa8ad5a4deb9d # v1
+        with:
+          execution-id: ${{ needs.beepboop.outputs.execution-id }}
+          publications: |
+            [{
+              "id": "pkg:cargo/git-remote-refs",
+              "manager": "cargo",
+              "name": "git-remote-refs",
+              "version": "${{ needs.package.outputs.version }}",
+              "required": true,
+              "outcome": "${{ steps.publish.outcome == 'success' && 'succeeded' || 'failed' }}"
+            }]
 
   npm:
     name: Publish to npm
-    if: github.event_name == 'release' || inputs.publish
-    needs: package
+    needs: [package, beepboop]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: npm
@@ -117,7 +173,43 @@ jobs:
           name: npm-package
           path: package
 
+      - name: Check whether the package exists
+        id: registry
+        run: |
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            https://registry.npmjs.org/git-remote-refs)
+          case "$status" in
+            200) echo "first=false" >> "$GITHUB_OUTPUT" ;;
+            404) echo "first=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::The npm registry answered HTTP $status"; exit 1 ;;
+          esac
+
+      # npm trusted publishing needs a published package. Its first version uses an access token.
+      - uses: kjanat/beepboop/actions/credentials@9a3412ef38f10908c2402dccc47fa8ad5a4deb9d # v1
+        id: credentials
+        if: steps.registry.outputs.first == 'true'
+        with:
+          execution-id: ${{ needs.beepboop.outputs.execution-id }}
+          aliases: '["npm-token"]'
+
       - name: Publish npm tarball
+        id: publish
         run: npm publish ./package/git-remote-refs-*.tgz --access public --ignore-scripts --tag "$NPM_TAG"
         env:
           NPM_TAG: ${{ needs.package.outputs.npm-tag }}
+          NODE_AUTH_TOKEN: ${{ fromJSON(steps.credentials.outputs.values || '{}')['npm-token'] }}
+
+      - name: Report publication
+        if: ${{ !cancelled() }}
+        uses: kjanat/beepboop/actions/report@9a3412ef38f10908c2402dccc47fa8ad5a4deb9d # v1
+        with:
+          execution-id: ${{ needs.beepboop.outputs.execution-id }}
+          publications: |
+            [{
+              "id": "pkg:npm/git-remote-refs",
+              "manager": "npm",
+              "name": "git-remote-refs",
+              "version": "${{ needs.package.outputs.version }}",
+              "required": true,
+              "outcome": "${{ steps.publish.outcome == 'success' && 'succeeded' || 'failed' }}"
+            }]
