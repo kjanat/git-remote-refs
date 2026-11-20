@@ -3,7 +3,7 @@
 [tools]
 npm                                = "12"
 node                               = "26"
-cargo-binstall                     = "1.23.0"
+cargo-binstall                     = "1.27.0"
 "github:wasm-bindgen/wasm-bindgen" = "0.2.130"
 "cargo:cargo-nextest"              = "0.9.152"
 "npm:tsrs"                         = "7.1.0-beta.tsrs3"
