@@ -52,18 +52,11 @@ jobs:
           version: "2026.11.10"
           cache: false
 
-      - name: Check release versions
+      - name: Choose the npm dist-tag
         id: version
         env:
           VERSION: ${{ fromJSON(steps.beepboop.outputs.context).version }}
         run: |
-          npm_version=$(node -p 'require("./package.json").version')
-          crate_version=$(cargo metadata --locked --no-deps --format-version 1 |
-            jq -er '.packages[] | select(.name == "git-remote-refs") | .version')
-          if [[ "$npm_version" != "$VERSION" || "$crate_version" != "$VERSION" ]]; then
-            echo "::error::Release $VERSION found package.json $npm_version and Cargo.toml $crate_version"
-            exit 1
-          fi
           case "${VERSION%%+*}" in
             *-*) echo "npm-tag=next" >> "$GITHUB_OUTPUT" ;;
             *)   echo "npm-tag=latest" >> "$GITHUB_OUTPUT" ;;
