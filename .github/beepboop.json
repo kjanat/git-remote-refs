@@ -1,0 +1,22 @@
+{
+  "$schema": "https://beepboop.kjanat.dev/schema/v1.json",
+  "streams": {
+    "git-remote-refs": {
+      "packages": ["pkg:cargo/git-remote-refs", "pkg:npm/git-remote-refs"],
+      "versionScope": "one-for-stream",
+      "mustPublish": ["pkg:cargo/git-remote-refs", "pkg:npm/git-remote-refs"],
+      "workflows": {
+        "publish": {
+          "file": "publish.yml",
+          "mode": "observe",
+          "ref": "refs/tags/*",
+          "publications": [
+            "pkg:cargo/git-remote-refs",
+            "pkg:npm/git-remote-refs"
+          ]
+        }
+      }
+    }
+  },
+  "managers": ["cargo", "npm", "workflow"]
+}
