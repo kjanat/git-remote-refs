@@ -26,4 +26,10 @@ package.readme     = "README.md"
 package.repository = "https://github.com/kjanat/git-remote-refs"
 package.license    = "MIT"
 resolver           = "3"
-members            = [".", "bindings/wasm"]
+members            = [".", "bindings/component", "bindings/wasm"]
+
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+
+[profile.dev.package.regalloc2]
+opt-level = 3

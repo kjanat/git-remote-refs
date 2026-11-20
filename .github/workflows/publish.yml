@@ -29,7 +29,7 @@ jobs:
       contents: read
       id-token: write
     env:
-      MISE_ENABLE_TOOLS: node,npm,github:wasm-bindgen/wasm-bindgen,npm:tsrs
+      MISE_ENABLE_TOOLS: node,npm,github:wasm-bindgen/wasm-bindgen,npm:tsrs,wasm-tools
     outputs:
       source-sha: ${{ fromJSON(steps.beepboop.outputs.context).sourceSha }}
       version: ${{ fromJSON(steps.beepboop.outputs.context).version }}
@@ -65,8 +65,8 @@ jobs:
       - name: Test and build
         run: |
           npm ci --ignore-scripts
+          mise run build ::: component:build
           cargo test --locked --workspace
-          mise run build
           node --test index.test.ts
 
       - name: Pack

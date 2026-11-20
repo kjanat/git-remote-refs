@@ -39,6 +39,10 @@ In a browser, serve the generated `wasm/` directory alongside `index.js`, and ro
 
 The `git-remote-refs` crate is `no_std` with `alloc` and performs no I/O. `Remote` builds each `Request`, the caller sends it, and `parse_discovery`, `parse_ls_refs` and `parse_fetch` read the `Response`. `resolve` and `candidates` implement the lookup order over a `RefList`. `Limits` bounds object count and size.
 
+## WebAssembly component
+
+`bindings/component` exports the same `Remote` API as a WebAssembly component. Its interface is `kjanat:git-remote-refs/git` in `bindings/component/wit/world.wit`. The component imports nothing, so the host sends each request and passes the response back. Errors are the `error` variant, and maps are lists of name and value pairs.
+
 ## Development
 
-`mise run build` compiles `bindings/wasm` into `wasm/`, then compiles `index.ts` with tsrs into `index.js` and `index.d.ts`. `mise run test` runs the Rust and JavaScript suites against local repositories served by `git http-backend`.
+`mise run build` compiles `bindings/wasm` into `wasm/`, then compiles `index.ts` with tsrs into `index.js` and `index.d.ts`. `mise run component:build` writes the component to `component/git-remote-refs.wasm`. `mise run test` runs the Rust, component and JavaScript suites against local repositories served by `git http-backend`.

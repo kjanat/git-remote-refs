@@ -7,6 +7,7 @@ cargo-binstall                     = "1.27.0"
 "github:wasm-bindgen/wasm-bindgen" = "0.2.130"
 "cargo:cargo-nextest"              = "0.9.152"
 "npm:tsrs"                         = "7.1.0-beta.tsrs3"
+wasm-tools                         = "1.263.0"
 "npm:@kjanat/fmt"                  = {
   version               = "0.64.1",
   trust_policy_excludes = ["@kprint/*", "@kjanat/*"],
@@ -14,9 +15,10 @@ cargo-binstall                     = "1.27.0"
 }
 
 [vars]
-target  = "wasm32-unknown-unknown"
-profile = "release"
-outdir  = "wasm"
+target    = "wasm32-unknown-unknown"
+profile   = "release"
+outdir    = "wasm"
+component = "component/git-remote-refs.wasm"
 
 [tasks.fmt]
 alias = ["f", "format"]
@@ -28,7 +30,7 @@ run     = [
   "cargo nextest run --workspace",
   "node --test index.test.ts",
 ]
-depends = "build"
+depends = ["build", "component:build"]
 
 [tasks."cargo:build"]
 vars = { cargo_locked = "{% if env.CI | default(value='false') == 'true' %} --locked{% endif %}" }
@@ -43,3 +45,11 @@ hide    = true
 [tasks.build]
 run     = "tsrs --project tsconfig.build.json"
 depends = "wasm-bindgen:build"
+
+[tasks."component:build"]
+vars = { cargo_locked = "{% if env.CI | default(value='false') == 'true' %} --locked{% endif %}" }
+run  = [
+  "cargo build{{vars.cargo_locked}} --package git-remote-refs-component --profile {{vars.profile}} --target {{vars.target}}",
+  "mkdir -p component",
+  "wasm-tools component new target/{{vars.target}}/{{vars.profile}}/git_remote_refs_component.wasm --output {{vars.component}}",
+]

@@ -1,0 +1,19 @@
+[package]
+name        = "git-remote-refs-component"
+version     = { workspace = true }
+authors     = { workspace = true }
+edition     = { workspace = true }
+description = "WebAssembly component bindings for git-remote-refs."
+repository  = { workspace = true }
+license     = { workspace = true }
+publish     = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+git-remote-refs = { path = "../.." }
+wit-bindgen     = { version = "0.63.0", default-features = false, features = ["macros", "realloc"] }
+
+[dev-dependencies]
+wasmtime = { version = "50.0.1", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }

@@ -1,0 +1,161 @@
+package kjanat:git-remote-refs;
+
+interface git {
+    enum object-format {
+        sha1,
+        sha256,
+    }
+
+    enum object-kind {
+        commit,
+        tree,
+        blob,
+        tag,
+    }
+
+    enum method {
+        get,
+        post,
+    }
+
+    variant error {
+        invalid-url,
+        invalid-ref-name,
+        invalid-prefix,
+        invalid-object-id,
+        auth-required(u16),
+        not-found,
+        http(u16),
+        not-smart-http,
+        protocol(string),
+        remote(string),
+        unsupported-object-format,
+        unsupported-feature(string),
+        checksum-mismatch,
+        limit-exceeded(string),
+        missing-object(string),
+    }
+
+    record request {
+        method: method,
+        url: string,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+
+    record response {
+        status: u16,
+        content-type: option<string>,
+        body: list<u8>,
+    }
+
+    record git-ref {
+        oid: string,
+        peeled: option<string>,
+        symref-target: option<string>,
+    }
+
+    record ref-list {
+        object-format: object-format,
+        refs: list<tuple<string, git-ref>>,
+        unborn: list<tuple<string, string>>,
+        prefixes: option<list<string>>,
+    }
+
+    record ref-match {
+        name: string,
+        target: git-ref,
+        others: list<string>,
+    }
+
+    record object-match {
+        oid: string,
+        refs: list<string>,
+    }
+
+    variant resolution {
+        found-ref(ref-match),
+        found-object(object-match),
+        not-found,
+        incomplete(list<string>),
+    }
+
+    record signature {
+        name: string,
+        name-bytes: option<list<u8>>,
+        email: string,
+        email-bytes: option<list<u8>>,
+        time: s64,
+        offset-minutes: s32,
+    }
+
+    record tree-entry {
+        mode: u32,
+        name: string,
+        name-bytes: option<list<u8>>,
+        oid: string,
+    }
+
+    record commit {
+        oid: string,
+        tree: string,
+        parents: list<string>,
+        author: signature,
+        committer: signature,
+        encoding: option<string>,
+        message: string,
+        message-bytes: option<list<u8>>,
+    }
+
+    record tag {
+        oid: string,
+        target: string,
+        target-kind: object-kind,
+        name: string,
+        name-bytes: option<list<u8>>,
+        tagger: option<signature>,
+        message: string,
+        message-bytes: option<list<u8>>,
+    }
+
+    record tree {
+        oid: string,
+        entries: list<tree-entry>,
+    }
+
+    record blob {
+        oid: string,
+        data: list<u8>,
+    }
+
+    variant git-object {
+        commit(commit),
+        tree(tree),
+        blob(blob),
+        tag(tag),
+    }
+
+    record fetched {
+        wanted: list<git-object>,
+        objects: list<tuple<string, git-object>>,
+    }
+
+    resource remote {
+        constructor(url: string) -> result<remote, error>;
+        discovery-request: func() -> request;
+        accept-discovery: func(response: response) -> result<_, error>;
+        list-request: func(prefixes: list<string>) -> result<option<request>, error>;
+        accept-list: func(response: response) -> result<_, error>;
+        refs: func() -> result<ref-list, error>;
+        resolve: func(name: string) -> result<resolution, error>;
+        fetch-request: func(oids: list<string>) -> result<request, error>;
+        accept-fetch: func(response: response, oids: list<string>) -> result<fetched, error>;
+    }
+
+    candidates: func(name: string) -> result<list<string>, error>;
+    parse-advertisement: func(body: list<u8>) -> result<ref-list, error>;
+}
+
+world git-remote-refs {
+    export git;
+}
