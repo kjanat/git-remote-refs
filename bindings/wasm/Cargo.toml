@@ -1,8 +1,12 @@
 [package]
-name    = "git-remote-refs-wasm"
-version = "0.1.0"
-edition = "2024"
-publish = false
+name        = "git-remote-refs-wasm"
+version     = { workspace = true }
+authors     = { workspace = true }
+edition     = { workspace = true }
+description = "WebAssembly bindings for the git-remote-refs JavaScript package."
+repository  = { workspace = true }
+license     = { workspace = true }
+publish     = false
 
 [lib]
 crate-type = ["cdylib"]

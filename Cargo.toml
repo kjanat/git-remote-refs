@@ -1,12 +1,17 @@
 [package]
-name        = "git-remote-refs"
-version     = "0.0.0"
-edition     = "2024"
-description = "I/O-free, no_std Rust library for listing refs and fetching objects over Git smart HTTP."
-repository  = "https://github.com/kjanat/git-remote-refs"
-license     = "MIT"
-include     = ["src/**", "tests/**", "Cargo.toml", "LICENSE", "README.md"]
-publish     = ["crates-io"]
+name          = "git-remote-refs"
+version       = { workspace = true }
+authors       = { workspace = true }
+edition       = { workspace = true }
+description   = "I/O-free, no_std Rust library for listing refs and fetching objects over Git smart HTTP."
+documentation = "https://docs.rs/git-remote-refs"
+readme        = { workspace = true }
+repository    = { workspace = true }
+license       = { workspace = true }
+keywords      = ["git", "git-protocol", "ls-remote", "smart-http", "wasm"]
+categories    = ["development-tools", "network-programming", "no-std", "parser-implementations", "wasm"]
+include       = ["/src/**", "/tests/**", "/Cargo.toml", "/LICENSE", "/README.md"]
+publish       = ["crates-io"]
 
 [dependencies]
 miniz_oxide = { version = "0.9.1", default-features = false, features = ["with-alloc"] }
@@ -14,4 +19,11 @@ sha1        = { version = "0.11.0", default-features = false }
 sha2        = { version = "0.11.1", default-features = false }
 
 [workspace]
-members = ["bindings/wasm"]
+package.version    = "0.0.0"
+package.authors    = ["Kaj Kowalski"]
+package.edition    = "2024"
+package.readme     = "README.md"
+package.repository = "https://github.com/kjanat/git-remote-refs"
+package.license    = "MIT"
+resolver           = "3"
+members            = [".", "bindings/wasm"]
