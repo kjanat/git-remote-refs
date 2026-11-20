@@ -2,6 +2,8 @@ module github.com/kjanat/git-remote-refs/go
 
 go 1.27.0
 
+toolchain go1.27.4
+
 tool github.com/kjanat/wacogo/cmd/wacogo-witgen
 
 require github.com/kjanat/wacogo v0.3.2
