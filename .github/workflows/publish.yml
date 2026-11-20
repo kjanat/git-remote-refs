@@ -136,7 +136,7 @@ jobs:
               "name": "git-remote-refs",
               "version": "${{ needs.package.outputs.version }}",
               "required": true,
-              "outcome": "${{ steps.publish.outcome == 'success' && 'succeeded' || steps.publish.outcome == 'cancelled' && 'uncertain' || steps.publish.outcome == 'skipped' && 'skipped' || 'failed' }}"
+              "outcome": "${{ case(steps.publish.outcome == 'success', 'succeeded', steps.publish.outcome == 'failure', 'failed', job.status == 'cancelled', 'cancelled', steps.publish.outcome == 'skipped', 'skipped', 'failed') }}"
             }]
 
   npm:
@@ -201,7 +201,7 @@ jobs:
               "name": "git-remote-refs",
               "version": "${{ needs.package.outputs.version }}",
               "required": true,
-              "outcome": "${{ (steps.oidc.outcome == 'success' || steps.token.outcome == 'success') && 'succeeded' || (steps.oidc.outcome == 'cancelled' || steps.token.outcome == 'cancelled') && 'uncertain' || steps.oidc.outcome == 'skipped' && 'skipped' || 'failed' }}"
+              "outcome": "${{ case(steps.oidc.outcome == 'success' || steps.token.outcome == 'success', 'succeeded', steps.token.outcome == 'failure', 'failed', job.status == 'cancelled', 'cancelled', steps.oidc.outcome == 'skipped', 'skipped', 'failed') }}"
             }]
 
   release:
