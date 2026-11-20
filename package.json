@@ -1,6 +1,6 @@
 {
 	"name": "git-remote-refs",
-	"version": "0.1.0",
+	"version": "0.0.0",
 	"description": "List and resolve refs and fetch objects from public Git repositories over smart HTTP without cloning.",
 	"repository": {
 		"type": "git",

@@ -1,6 +1,6 @@
 [package]
 name        = "git-remote-refs"
-version     = "0.1.0"
+version     = "0.0.0"
 edition     = "2024"
 description = "I/O-free, no_std Rust library for listing refs and fetching objects over Git smart HTTP."
 repository  = "https://github.com/kjanat/git-remote-refs"
