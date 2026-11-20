@@ -500,6 +500,21 @@ func TestErrors(t *testing.T) {
 	}
 }
 
+func TestCancelledCallKeepsClientUsable(t *testing.T) {
+	ctx := context.Background()
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := shared.ListRefs(cancelled, repo(v2, "sha1")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled ListRefs = %v", err)
+	}
+	if _, err := shared.ListRefs(ctx, repo(v2, "sha1")); err != nil {
+		t.Fatalf("ListRefs after cancellation = %v", err)
+	}
+	if _, err := shared.ParseAdvertisement(cancelled, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled ParseAdvertisement = %v", err)
+	}
+}
+
 func TestErrorText(t *testing.T) {
 	for _, tc := range []struct {
 		err  *Error
@@ -595,22 +610,19 @@ func TestLoadFailures(t *testing.T) {
 	if err := closed.load(ctx); err == nil {
 		t.Error("load succeeded on a closed engine")
 	}
-	stopped := &Client{http: http.DefaultClient, engine: wacogo.NewEngine(ctx)}
-	t.Cleanup(func() {
-		if err := stopped.engine.Close(ctx); err != nil {
-			t.Error(err)
-		}
-	})
-	factory, err := git.NewFactory(ctx, stopped.engine)
+	component = original
+	stopped, err := New(ctx, http.DefaultClient)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stopped.factory = factory
-	if err := factory.Close(ctx); err != nil {
+	if err := stopped.factory.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := stopped.start(ctx); err == nil {
-		t.Error("start succeeded with a closed factory")
+	if _, err := stopped.ListRefs(ctx, repo(v2, "sha1")); err == nil {
+		t.Error("ListRefs succeeded with a closed factory")
+	}
+	if err := stopped.Close(ctx); err != nil {
+		t.Error(err)
 	}
 }
 
@@ -745,6 +757,8 @@ func TestComponentFailures(t *testing.T) {
 		{"list", "ListRequest", 1, nil, errInjected, ""},
 		{"list", "ListRequest", 1, nil, nil, unexpected},
 		{"list", "AcceptList", 1, nil, errInjected, ""},
+		{"list", "AcceptList", 1, nil, nil, unexpected},
+		{"list", "AcceptList", 1, git.Result_ErrorErr{Value: git.ErrorNotSmartHTTP{}}, nil, "not-smart-http"},
 		{"list", "Refs", 1, nil, errInjected, ""},
 		{"list", "Refs", 1, nil, nil, unexpected},
 		{"list", "Refs", 1, git.ResultRefListErrorErr{Value: git.ErrorProtocol{Value: "injected"}}, nil, "protocol: injected"},
@@ -787,14 +801,7 @@ func TestComponentFailures(t *testing.T) {
 }
 
 func withFault(f *fault, run func()) {
-	shared.mu.Lock()
-	real := shared.git
-	shared.git = faultyGit{real, f}
-	shared.mu.Unlock()
-	defer func() {
-		shared.mu.Lock()
-		shared.git = real
-		shared.mu.Unlock()
-	}()
+	shared.adapt = func(g git.Git) git.Git { return faultyGit{g, f} }
+	defer func() { shared.adapt = nil }()
 	run()
 }

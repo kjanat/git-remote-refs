@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/kjanat/git-remote-refs/go/internal/kjanat/git-remote-refs/git"
@@ -23,15 +22,19 @@ const maxTagChain = 16
 
 type Client struct {
 	http     *http.Client
-	mu       sync.Mutex
 	engine   *wacogo.Engine
 	factory  *git.Factory
-	host     *host.ComponentInstance
-	instance *wacogo.ComponentInstance
-	git      git.Git
+	compiled *wacogo.Component
+	adapt    func(git.Git) git.Git
 }
 
 type stub struct{ git.Git }
+
+type instance struct {
+	host  *host.ComponentInstance
+	guest *wacogo.ComponentInstance
+	git   git.Git
+}
 
 func New(ctx context.Context, httpClient *http.Client) (*Client, error) {
 	c := &Client{http: httpClient, engine: wacogo.NewEngine(ctx)}
@@ -41,47 +44,69 @@ func New(ctx context.Context, httpClient *http.Client) (*Client, error) {
 	return c, nil
 }
 
-func (c *Client) load(ctx context.Context) error {
-	factory, err := git.NewFactory(ctx, c.engine)
-	if err != nil {
+func (c *Client) load(ctx context.Context) (err error) {
+	if c.factory, err = git.NewFactory(ctx, c.engine); err != nil {
 		return err
 	}
-	c.factory = factory
-	return c.start(ctx)
-}
-
-func (c *Client) start(ctx context.Context) (err error) {
-	if c.host, err = c.factory.NewInstance(ctx, stub{}, nil); err != nil {
+	if c.compiled, err = c.engine.LoadComponent(ctx, bytes.NewReader(component)); err != nil {
 		return err
 	}
-	compiled, err := c.engine.LoadComponent(ctx, bytes.NewReader(component))
-	if err != nil {
-		return err
-	}
-	if c.instance, err = compiled.Instantiate(ctx); err != nil {
-		return err
-	}
-	exported := c.instance.ExportedInstance("kjanat:git-remote-refs/git")
-	if exported == nil {
-		return errors.New("git-remote-refs: component does not export kjanat:git-remote-refs/git")
-	}
-	c.git = git.WrapInstance(c.host, exported)
-	return nil
+	return c.with(ctx, func(git.Git) error { return nil })
 }
 
 func (c *Client) Close(ctx context.Context) error {
 	var errs []error
-	if c.instance != nil {
-		errs = append(errs, c.instance.Close(ctx))
-	}
-	if c.host != nil {
-		errs = append(errs, c.host.Close(ctx))
+	if c.compiled != nil {
+		errs = append(errs, c.compiled.Close(ctx))
 	}
 	if c.factory != nil {
 		errs = append(errs, c.factory.Close(ctx))
 	}
 	errs = append(errs, c.engine.Close(ctx))
 	return errors.Join(errs...)
+}
+
+func (c *Client) instantiate(ctx context.Context) (*instance, error) {
+	i := &instance{}
+	fail := func(err error) (*instance, error) {
+		return nil, errors.Join(err, i.close(context.WithoutCancel(ctx)))
+	}
+	var err error
+	if i.host, err = c.factory.NewInstance(ctx, stub{}, nil); err != nil {
+		return fail(err)
+	}
+	if i.guest, err = c.compiled.Instantiate(ctx); err != nil {
+		return fail(err)
+	}
+	exported := i.guest.ExportedInstance("kjanat:git-remote-refs/git")
+	if exported == nil {
+		return fail(errors.New("git-remote-refs: component does not export kjanat:git-remote-refs/git"))
+	}
+	i.git = git.WrapInstance(i.host, exported)
+	if c.adapt != nil {
+		i.git = c.adapt(i.git)
+	}
+	return i, nil
+}
+
+func (i *instance) close(ctx context.Context) error {
+	var errs []error
+	if i.guest != nil {
+		errs = append(errs, i.guest.Close(ctx))
+	}
+	if i.host != nil {
+		errs = append(errs, i.host.Close(ctx))
+	}
+	return errors.Join(errs...)
+}
+
+func (c *Client) with(ctx context.Context, work func(git.Git) error) (err error) {
+	i, err := c.instantiate(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, i.close(context.WithoutCancel(ctx))) }()
+	return work(i.git)
 }
 
 func (c *Client) ListRefs(ctx context.Context, repository string, prefixes ...string) (*RefList, error) {
@@ -105,7 +130,7 @@ func (c *Client) GetRef(ctx context.Context, repository, name string) (Ref, bool
 func (c *Client) Resolve(ctx context.Context, repository, name string) (Resolution, error) {
 	var resolution Resolution
 	err := c.session(ctx, repository, func(s *session) error {
-		names, err := c.candidates(ctx, name)
+		names, err := candidates(ctx, s.git, name)
 		if err != nil {
 			return err
 		}
@@ -158,139 +183,9 @@ func (c *Client) Peel(ctx context.Context, repository, oid string) (*Peeled, err
 }
 
 func (c *Client) ParseAdvertisement(ctx context.Context, body []byte) (*RefList, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	result, err := c.git.ParseAdvertisement(ctx, body)
-	if err != nil {
-		return nil, err
-	}
-	switch r := result.(type) {
-	case git.ResultRefListErrorOk:
-		return refList(r.Value), nil
-	case git.ResultRefListErrorErr:
-		return nil, failure(r.Value)
-	}
-	return nil, unexpected(result)
-}
-
-func (c *Client) candidates(ctx context.Context, name string) ([]string, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	result, err := c.git.Candidates(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-	switch r := result.(type) {
-	case git.ResultListStringErrorOk:
-		return r.Value, nil
-	case git.ResultListStringErrorErr:
-		return nil, failure(r.Value)
-	}
-	return nil, unexpected(result)
-}
-
-type session struct {
-	ctx    context.Context
-	client *Client
-	remote *git.RemoteHandle
-}
-
-func (c *Client) session(ctx context.Context, repository string, work func(*session) error) (err error) {
-	remote, err := c.newRemote(ctx, repository)
-	if err != nil {
-		return err
-	}
-	s := &session{ctx: ctx, client: c, remote: remote}
-	defer func() {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		err = errors.Join(err, remote.Drop(ctx))
-	}()
-	if err := s.discover(); err != nil {
-		return err
-	}
-	return work(s)
-}
-
-func (c *Client) newRemote(ctx context.Context, repository string) (*git.RemoteHandle, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	result, err := c.git.NewRemote(ctx, repository)
-	if err != nil {
-		return nil, err
-	}
-	switch r := result.(type) {
-	case git.ResultRemoteErrorOk:
-		return r.Value, nil
-	case git.ResultRemoteErrorErr:
-		return nil, failure(r.Value)
-	}
-	return nil, unexpected(result)
-}
-
-func (s *session) locked(call func() error) error {
-	s.client.mu.Lock()
-	defer s.client.mu.Unlock()
-	return call()
-}
-
-func (s *session) discover() error {
-	var request git.Request
-	if err := s.locked(func() (err error) {
-		request, err = s.remote.DiscoveryRequest(s.ctx)
-		return err
-	}); err != nil {
-		return err
-	}
-	response, err := s.exchange(request)
-	if err != nil {
-		return err
-	}
-	return s.locked(func() error {
-		result, err := s.remote.AcceptDiscovery(s.ctx, response)
-		if err != nil {
-			return err
-		}
-		return unit(result)
-	})
-}
-
-func (s *session) list(prefixes []string) (*RefList, error) {
-	var request git.OptionRequest
-	if err := s.locked(func() error {
-		result, err := s.remote.ListRequest(s.ctx, prefixes)
-		if err != nil {
-			return err
-		}
-		switch r := result.(type) {
-		case git.ResultOptionRequestErrorOk:
-			request = r.Value
-			return nil
-		case git.ResultOptionRequestErrorErr:
-			return failure(r.Value)
-		}
-		return unexpected(result)
-	}); err != nil {
-		return nil, err
-	}
-	if request.IsSome {
-		response, err := s.exchange(request.Value)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.locked(func() error {
-			result, err := s.remote.AcceptList(s.ctx, response)
-			if err != nil {
-				return err
-			}
-			return unit(result)
-		}); err != nil {
-			return nil, err
-		}
-	}
 	var list *RefList
-	err := s.locked(func() error {
-		result, err := s.remote.Refs(s.ctx)
+	err := c.with(ctx, func(g git.Git) error {
+		result, err := g.ParseAdvertisement(ctx, body)
 		if err != nil {
 			return err
 		}
@@ -306,64 +201,157 @@ func (s *session) list(prefixes []string) (*RefList, error) {
 	return list, err
 }
 
-func (s *session) resolve(name string) (Resolution, error) {
-	var resolution Resolution
-	err := s.locked(func() error {
-		result, err := s.remote.Resolve(s.ctx, name)
+func candidates(ctx context.Context, g git.Git, name string) ([]string, error) {
+	result, err := g.Candidates(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	switch r := result.(type) {
+	case git.ResultListStringErrorOk:
+		return r.Value, nil
+	case git.ResultListStringErrorErr:
+		return nil, failure(r.Value)
+	}
+	return nil, unexpected(result)
+}
+
+type session struct {
+	ctx    context.Context
+	http   *http.Client
+	git    git.Git
+	remote *git.RemoteHandle
+}
+
+func (c *Client) session(ctx context.Context, repository string, work func(*session) error) error {
+	return c.with(ctx, func(g git.Git) (err error) {
+		remote, err := newRemote(ctx, g, repository)
 		if err != nil {
 			return err
 		}
-		switch r := result.(type) {
-		case git.ResultResolutionErrorOk:
-			resolution, err = resolve(r.Value)
+		defer func() { err = errors.Join(err, remote.Drop(context.WithoutCancel(ctx))) }()
+		s := &session{ctx: ctx, http: c.http, git: g, remote: remote}
+		if err := s.discover(); err != nil {
 			return err
-		case git.ResultResolutionErrorErr:
-			return failure(r.Value)
 		}
-		return unexpected(result)
+		return work(s)
 	})
-	return resolution, err
+}
+
+func newRemote(ctx context.Context, g git.Git, repository string) (*git.RemoteHandle, error) {
+	result, err := g.NewRemote(ctx, repository)
+	if err != nil {
+		return nil, err
+	}
+	switch r := result.(type) {
+	case git.ResultRemoteErrorOk:
+		return r.Value, nil
+	case git.ResultRemoteErrorErr:
+		return nil, failure(r.Value)
+	}
+	return nil, unexpected(result)
+}
+
+func (s *session) discover() error {
+	request, err := s.remote.DiscoveryRequest(s.ctx)
+	if err != nil {
+		return err
+	}
+	response, err := s.exchange(request)
+	if err != nil {
+		return err
+	}
+	result, err := s.remote.AcceptDiscovery(s.ctx, response)
+	if err != nil {
+		return err
+	}
+	return unit(result)
+}
+
+func (s *session) list(prefixes []string) (*RefList, error) {
+	result, err := s.remote.ListRequest(s.ctx, prefixes)
+	if err != nil {
+		return nil, err
+	}
+	var request git.OptionRequest
+	switch r := result.(type) {
+	case git.ResultOptionRequestErrorOk:
+		request = r.Value
+	case git.ResultOptionRequestErrorErr:
+		return nil, failure(r.Value)
+	default:
+		return nil, unexpected(result)
+	}
+	if request.IsSome {
+		response, err := s.exchange(request.Value)
+		if err != nil {
+			return nil, err
+		}
+		accepted, err := s.remote.AcceptList(s.ctx, response)
+		if err != nil {
+			return nil, err
+		}
+		if err := unit(accepted); err != nil {
+			return nil, err
+		}
+	}
+	refs, err := s.remote.Refs(s.ctx)
+	if err != nil {
+		return nil, err
+	}
+	switch r := refs.(type) {
+	case git.ResultRefListErrorOk:
+		return refList(r.Value), nil
+	case git.ResultRefListErrorErr:
+		return nil, failure(r.Value)
+	}
+	return nil, unexpected(refs)
+}
+
+func (s *session) resolve(name string) (Resolution, error) {
+	result, err := s.remote.Resolve(s.ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	switch r := result.(type) {
+	case git.ResultResolutionErrorOk:
+		return resolve(r.Value)
+	case git.ResultResolutionErrorErr:
+		return nil, failure(r.Value)
+	}
+	return nil, unexpected(result)
 }
 
 func (s *session) fetch(oid string) (Object, map[string]Object, error) {
 	oids := []string{oid}
-	var request git.Request
-	if err := s.locked(func() error {
-		result, err := s.remote.FetchRequest(s.ctx, oids)
-		if err != nil {
-			return err
-		}
-		switch r := result.(type) {
-		case git.ResultRequestErrorOk:
-			request = r.Value
-			return nil
-		case git.ResultRequestErrorErr:
-			return failure(r.Value)
-		}
-		return unexpected(result)
-	}); err != nil {
+	result, err := s.remote.FetchRequest(s.ctx, oids)
+	if err != nil {
 		return nil, nil, err
+	}
+	var request git.Request
+	switch r := result.(type) {
+	case git.ResultRequestErrorOk:
+		request = r.Value
+	case git.ResultRequestErrorErr:
+		return nil, nil, failure(r.Value)
+	default:
+		return nil, nil, unexpected(result)
 	}
 	response, err := s.exchange(request)
 	if err != nil {
 		return nil, nil, err
 	}
-	var fetched git.Fetched
-	if err := s.locked(func() error {
-		result, err := s.remote.AcceptFetch(s.ctx, response, oids)
-		if err != nil {
-			return err
-		}
-		switch r := result.(type) {
-		case git.ResultFetchedErrorOk:
-			fetched = r.Value
-			return nil
-		case git.ResultFetchedErrorErr:
-			return failure(r.Value)
-		}
-		return unexpected(result)
-	}); err != nil {
+	accepted, err := s.remote.AcceptFetch(s.ctx, response, oids)
+	if err != nil {
 		return nil, nil, err
+	}
+	var fetched git.Fetched
+	switch r := accepted.(type) {
+	case git.ResultFetchedErrorOk:
+		fetched = r.Value
+	case git.ResultFetchedErrorErr:
+		return nil, nil, failure(r.Value)
+	default:
+		return nil, nil, unexpected(accepted)
 	}
 	wanted, err := object(fetched.Wanted[0])
 	if err != nil {
@@ -394,7 +382,7 @@ func (s *session) exchange(request git.Request) (git.Response, error) {
 	for _, header := range request.Headers {
 		req.Header.Set(header.F0, header.F1)
 	}
-	resp, err := s.client.http.Do(req)
+	resp, err := s.http.Do(req)
 	if err != nil {
 		return git.Response{}, err
 	}
