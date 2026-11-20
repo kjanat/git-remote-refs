@@ -31,7 +31,8 @@ run     = [
 depends = "build"
 
 [tasks."cargo:build"]
-run  = "cargo build --locked --package git-remote-refs-wasm --profile {{vars.profile}} --target {{vars.target}}"
+vars = { cargo_locked = "{% if env.CI | default(value='false') == 'true' %} --locked{% endif %}" }
+run  = "cargo build{{vars.cargo_locked}} --package git-remote-refs-wasm --profile {{vars.profile}} --target {{vars.target}}"
 hide = true
 
 [tasks."wasm-bindgen:build"]
