@@ -1,3 +1,6 @@
 #:schema https://raw.githubusercontent.com/kjanat/kjanat/refs/heads/master/schemas/dprint.schema.json
 
 extends = "https://github.com/kjanat/kjanat/raw/refs/heads/master/configs/dprint.remote.json"
+
+[exec]
+playWithFire = ["rustfmt"]
