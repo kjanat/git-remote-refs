@@ -27,7 +27,7 @@ export type {
 export interface RemoteOptions {
 	fetch?: (url: string, init: RequestInit) => Response | Promise<Response>;
 	signal?: AbortSignal;
-	/** Maximum bytes read from each HTTP response. Defaults to 64 MiB. */
+	/** Maximum body size in bytes for each successful HTTP response. Defaults to 64 MiB. */
 	maxResponseBytes?: number;
 }
 
@@ -76,31 +76,39 @@ async function readResponse(response: Response, maxBytes: number): Promise<Uint8
 		return new Uint8Array();
 	}
 	const reader = body.getReader();
-	const chunks: Uint8Array[] = [];
+	let bytes = new Uint8Array();
 	let length = 0;
 	try {
 		for (;;) {
 			const { done, value } = await reader.read();
 			if (done) break;
-			length += value.byteLength;
-			if (length > maxBytes) {
-				void reader.cancel().catch(() => {});
+			if (
+				!(value instanceof Uint8Array)
+				&& !(ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === '[object Uint8Array]')
+			) {
+				throw new TypeError('HTTP response body must yield Uint8Array chunks');
+			}
+			const nextLength = length + value.byteLength;
+			if (nextLength > maxBytes) {
 				throw Object.assign(new Error(`limit exceeded: HTTP response exceeds ${maxBytes} bytes`), {
 					code: 'limit-exceeded',
 				});
 			}
-			chunks.push(value);
+			if (nextLength > bytes.byteLength) {
+				const expanded = new Uint8Array(Math.min(maxBytes, Math.max(nextLength, bytes.byteLength * 2)));
+				expanded.set(bytes);
+				bytes = expanded;
+			}
+			bytes.set(value, length);
+			length = nextLength;
 		}
+	} catch (error) {
+		void reader.cancel().catch(() => {});
+		throw error;
 	} finally {
 		reader.releaseLock();
 	}
-	const bytes = new Uint8Array(length);
-	let offset = 0;
-	for (const chunk of chunks) {
-		bytes.set(chunk, offset);
-		offset += chunk.byteLength;
-	}
-	return bytes;
+	return bytes.subarray(0, length);
 }
 
 async function session<T>(

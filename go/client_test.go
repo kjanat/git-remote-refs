@@ -453,6 +453,51 @@ func TestResponseLimit(t *testing.T) {
 	}
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+type responseLimitBody struct {
+	readErr  error
+	closeErr error
+	bytes    int
+	closed   bool
+}
+
+func (b *responseLimitBody) Read(p []byte) (int, error) {
+	clear(p)
+	b.bytes += len(p)
+	return len(p), b.readErr
+}
+
+func (b *responseLimitBody) Close() error {
+	b.closed = true
+	return b.closeErr
+}
+
+func TestResponseLimitWithBodyErrors(t *testing.T) {
+	readErr := errors.New("read failed after delivering bytes")
+	closeErr := errors.New("close failed")
+	body := &responseLimitBody{readErr: readErr, closeErr: closeErr}
+	s := &session{
+		ctx:              context.Background(),
+		maxResponseBytes: 5,
+		http: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: body, ContentLength: -1}, nil
+		})},
+	}
+	_, err := s.exchange(git.Request{URL: "https://example.com/repo"})
+	wantCode(t, err, CodeLimitExceeded, 0, "HTTP response exceeds 5 bytes")
+	if !errors.Is(err, readErr) || !errors.Is(err, closeErr) {
+		t.Fatalf("expected read and close errors, got %v", err)
+	}
+	if body.bytes != 6 || !body.closed {
+		t.Fatalf("read %d bytes, closed = %t", body.bytes, body.closed)
+	}
+}
+
 func TestErrors(t *testing.T) {
 	ctx := context.Background()
 	_, err := shared.ListRefs(ctx, "ssh://example.com/repo")

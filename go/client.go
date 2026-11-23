@@ -24,7 +24,7 @@ const defaultMaxResponseBytes = 64 << 20
 
 // ClientOptions configures the client's HTTP response limit.
 type ClientOptions struct {
-	// MaxResponseBytes limits each HTTP response. Zero selects 64 MiB.
+	// MaxResponseBytes limits the body size of each successful HTTP response. Zero selects 64 MiB.
 	MaxResponseBytes int64
 }
 
@@ -414,14 +414,15 @@ func (s *session) exchange(request git.Request) (git.Response, error) {
 		return response, nil
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, s.maxResponseBytes+1))
-	if err = errors.Join(err, resp.Body.Close()); err != nil {
-		return git.Response{}, err
-	}
+	closeErr := resp.Body.Close()
 	if int64(len(data)) > s.maxResponseBytes {
-		return git.Response{}, &Error{
+		return git.Response{}, errors.Join(&Error{
 			Code:   CodeLimitExceeded,
 			Detail: fmt.Sprintf("HTTP response exceeds %d bytes", s.maxResponseBytes),
-		}
+		}, err, closeErr)
+	}
+	if err := errors.Join(err, closeErr); err != nil {
+		return git.Response{}, err
 	}
 	response.Body = data
 	if contentType := resp.Header.Get("Content-Type"); contentType != "" {

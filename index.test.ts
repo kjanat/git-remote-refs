@@ -208,7 +208,22 @@ test('HTTP response limit caps streaming bodies before parsing', async () => {
 	const repository = repo('sha1');
 	const response = await source(`${repository}/info/refs?service=git-upload-pack`, { method: 'GET' });
 	const advertisement = new Uint8Array(await response.arrayBuffer());
-	assert((await listRefs(repository, { fetch: source, maxResponseBytes: advertisement.byteLength })).refs.has('HEAD'));
+	const exact: Fetch = () => {
+		const chunk = new Uint8Array(1);
+		let offset = 0;
+		return new Response(new ReadableStream<Uint8Array>({
+			pull(controller) {
+				if (offset === advertisement.byteLength) {
+					controller.close();
+					return;
+				}
+				chunk.set(advertisement.subarray(offset, offset + 1));
+				offset++;
+				controller.enqueue(chunk);
+			},
+		}, { highWaterMark: 0 }), { headers: response.headers });
+	};
+	assert((await listRefs(repository, { fetch: exact, maxResponseBytes: advertisement.byteLength })).refs.has('HEAD'));
 
 	let cancelled = false;
 	const oversized: Fetch = () => new Response(new ReadableStream<Uint8Array>({
@@ -222,8 +237,18 @@ test('HTTP response limit caps streaming bodies before parsing', async () => {
 	}));
 	await assert.rejects(listRefs(repository, { fetch: oversized, maxResponseBytes: 5 }), { code: 'limit-exceeded' });
 	assert(cancelled);
-	const httpError: Fetch = () => new Response('oversized error page', { status: 404 });
+	let errorCancelled = false;
+	const httpError: Fetch = () => new Response(new ReadableStream<Uint8Array>({
+		pull() {
+			assert.fail('HTTP error body should not be read');
+		},
+		cancel() {
+			errorCancelled = true;
+			return Promise.reject(new Error('cancel failed'));
+		},
+	}, { highWaterMark: 0 }), { status: 404 });
 	await assert.rejects(listRefs(repository, { fetch: httpError, maxResponseBytes: 5 }), { code: 'not-found', status: 404 });
+	assert(errorCancelled);
 });
 
 test('requests carry the caller signal', async () => {
