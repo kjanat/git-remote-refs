@@ -2,9 +2,22 @@
 	"name": "git-remote-refs",
 	"version": "0.0.0",
 	"description": "List and resolve refs and fetch objects from public Git repositories over smart HTTP without cloning.",
+	"keywords": [
+		"git",
+		"git-protocol",
+		"git-refs",
+		"git-objects",
+		"ls-remote",
+		"smart-http",
+		"wasm"
+	],
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/kjanat/git-remote-refs.git"
+	},
+	"funding": {
+		"type": "github",
+		"url": "https://github.com/sponsors/kjanat"
 	},
 	"license": "MIT",
 	"type": "module",
