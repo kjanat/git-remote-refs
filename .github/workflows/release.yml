@@ -226,7 +226,7 @@ jobs:
 
       - name: Package for npm
         if: env.DRY_RUN == 'true'
-        run: npm publish "packages/git-remote-refs-$VERSION.tgz" --dry-run --access public --ignore-scripts
+        run: npm publish "./packages/git-remote-refs-$VERSION.tgz" --dry-run --access public --ignore-scripts
 
       - uses: kjanat/beepboop/actions/begin@6a16e1e7731247f029348aab8fa2e3e8990763ef # v1.10.20
         id: beepboop
@@ -242,7 +242,7 @@ jobs:
         continue-on-error: true
         shell: bash --noprofile --norc -uo pipefail {0}
         run: |
-          output="$(npm publish "packages/git-remote-refs-$VERSION.tgz" --access public --ignore-scripts 2>&1)"
+          output="$(npm publish "./packages/git-remote-refs-$VERSION.tgz" --access public --ignore-scripts 2>&1)"
           code=$?
           echo "$output"
           if (( code != 0 )) && [[ "$output" == *"cannot publish over the previously published versions"* ]]; then
@@ -265,7 +265,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ fromJSON(steps.credentials.outputs.values || '{}')['npm-token'] }}
         shell: bash --noprofile --norc -uo pipefail {0}
         run: |
-          output="$(npm publish "packages/git-remote-refs-$VERSION.tgz" --access public --ignore-scripts 2>&1)"
+          output="$(npm publish "./packages/git-remote-refs-$VERSION.tgz" --access public --ignore-scripts 2>&1)"
           code=$?
           echo "$output"
           if (( code != 0 )) && [[ "$output" == *"cannot publish over the previously published versions"* ]]; then
