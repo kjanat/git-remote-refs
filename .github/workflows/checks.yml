@@ -28,6 +28,9 @@ jobs:
         with:
           cache: false
 
+      - name: Install the Rust toolchain
+        run: rustup toolchain install
+
       - name: Build
         run: |
           npm ci --ignore-scripts
