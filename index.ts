@@ -127,7 +127,11 @@ export function resolve(repository: string | URL, name: string, options?: Remote
 }
 
 /** Resolve a name and fetch its exact object in a single discovery session. */
-export function resolveObject(repository: string | URL, name: string, options?: RemoteOptions): Promise<ResolvedObject> {
+export function resolveObject(
+	repository: string | URL,
+	name: string,
+	options?: RemoteOptions,
+): Promise<ResolvedObject> {
 	return session(repository, options, async (remote, exchange) => {
 		const resolution = await resolveName(remote, exchange, name);
 		if (resolution.kind !== 'ref' && resolution.kind !== 'object') {
