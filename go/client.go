@@ -129,18 +129,38 @@ func (c *Client) GetRef(ctx context.Context, repository, name string) (Ref, bool
 
 func (c *Client) Resolve(ctx context.Context, repository, name string) (Resolution, error) {
 	var resolution Resolution
-	err := c.session(ctx, repository, func(s *session) error {
-		names, err := candidates(ctx, s.git, name)
-		if err != nil {
-			return err
-		}
-		if _, err := s.list(names); err != nil {
-			return err
-		}
+	err := c.session(ctx, repository, func(s *session) (err error) {
 		resolution, err = s.resolve(name)
 		return err
 	})
 	return resolution, err
+}
+
+// ResolveObject resolves a name and fetches its exact object in one discovery session.
+func (c *Client) ResolveObject(ctx context.Context, repository, name string) (*ResolvedObject, error) {
+	resolved := &ResolvedObject{}
+	err := c.session(ctx, repository, func(s *session) error {
+		resolution, err := s.resolve(name)
+		if err != nil {
+			return err
+		}
+		resolved.Resolution = resolution
+		var oid string
+		switch match := resolution.(type) {
+		case *RefMatch:
+			oid = match.Ref.OID
+		case *ObjectMatch:
+			oid = match.OID
+		default:
+			return nil
+		}
+		resolved.Object, _, err = s.fetch(oid)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resolved, nil
 }
 
 func (c *Client) GetObject(ctx context.Context, repository, oid string) (Object, error) {
@@ -308,6 +328,13 @@ func (s *session) list(prefixes []string) (*RefList, error) {
 }
 
 func (s *session) resolve(name string) (Resolution, error) {
+	names, err := candidates(s.ctx, s.git, name)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.list(names); err != nil {
+		return nil, err
+	}
 	result, err := s.remote.Resolve(s.ctx, name)
 	if err != nil {
 		return nil, err

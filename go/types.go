@@ -114,6 +114,13 @@ func (*Tree) Kind() Kind   { return KindTree }
 func (*Blob) Kind() Kind   { return KindBlob }
 func (*Tag) Kind() Kind    { return KindTag }
 
+// ResolvedObject contains the resolution and its object, if the name was found.
+// For a ref pointing to an annotated tag, Object is the tag itself.
+type ResolvedObject struct {
+	Resolution Resolution
+	Object     Object
+}
+
 type Peeled struct {
 	Chain  []Object
 	Target Object

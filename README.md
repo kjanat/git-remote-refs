@@ -11,13 +11,12 @@ npm install git-remote-refs
 ```
 
 ```js
-import { getObject, resolve } from 'git-remote-refs';
+import { resolveObject } from 'git-remote-refs';
 
 const repo = 'https://github.com/denoland/setup-deno.git';
-const v2 = await resolve(repo, 'v2');
-// { kind: 'ref', name: 'refs/heads/v2', ref: { oid: '22d081ff…' }, others: [] }
-const commit = await getObject(repo, v2.ref.oid);
-// { kind: 'commit', oid, tree, parents, author, committer, message }
+const { resolution, object } = await resolveObject(repo, 'v2');
+// resolution: { kind: 'ref', name: 'refs/heads/v2', ref: { oid: '22d081ff…' }, others: [] }
+// object: { kind: 'commit', oid, tree, parents, author, committer, message }
 ```
 
 | Function                       | Returns                                                                                                                           |
@@ -25,9 +24,12 @@ const commit = await getObject(repo, v2.ref.oid);
 | `listRefs(repo, { prefixes })` | Every advertised ref with its `oid`, `peeled` tag target and `symrefTarget`, plus unborn symrefs such as `HEAD` of an empty repo. |
 | `getRef(repo, name)`           | The ref with exactly this full name, or `undefined`.                                                                              |
 | `resolve(repo, name)`          | The ref Git's `rev-parse` would pick for a short name, or the object for a full object ID.                                        |
+| `resolveObject(repo, name)`    | The resolution and exact object, using one discovery request.                                                                     |
 | `getObject(repo, oid)`         | The commit, tag, tree or blob with this ID, checked against its hash.                                                             |
 | `peel(repo, oid)`              | The chain of tags from `oid` to the first object that is not a tag.                                                               |
 | `parseAdvertisement(bytes)`    | The refs in a saved `info/refs` response.                                                                                         |
+
+`resolveObject` sets `object` to `undefined` for a name with no match. A full object ID always resolves to `kind: 'object'`. If the server lacks that object, `resolveObject` rejects with `remote`. An annotated tag resolves to the tag object itself. Use `peel` to follow the tag to its target.
 
 `resolve` tries `name`, `refs/name`, `refs/tags/name`, `refs/heads/name`, `refs/remotes/name` and `refs/remotes/name/HEAD` in that order. It returns `{ kind: 'ref', name, ref, others }`, `{ kind: 'object', oid, refs }` or `{ kind: 'not-found' }`. Revision syntax such as `v2^{}` fails with `invalid-ref-name`.
 
@@ -84,11 +86,15 @@ if err != nil {
 }
 defer client.Close(ctx)
 
-resolution, err := client.Resolve(ctx, "https://github.com/denoland/setup-deno.git", "v2")
-// &gitremoterefs.RefMatch{Name: "refs/heads/v2", Ref: gitremoterefs.Ref{OID: "22d081ff…"}, Others: []string{}}
+resolved, err := client.ResolveObject(ctx, "https://github.com/denoland/setup-deno.git", "v2")
+if err != nil {
+    return err
+}
+// resolved.Resolution is a *gitremoterefs.RefMatch for refs/heads/v2.
+// resolved.Object is a *gitremoterefs.Commit.
 ```
 
-The module is pure Go and needs no cgo. `Client` has `ListRefs`, `GetRef`, `Resolve`, `GetObject`, `Peel` and `ParseAdvertisement`, which behave like their JavaScript counterparts. It is safe for concurrent use. Names, emails and messages hold the raw bytes from the object. Protocol failures are `*gitremoterefs.Error` values with a `Code`, a `Status` for HTTP failures and a `Detail`.
+The module is pure Go and needs no cgo. `Client` has `ListRefs`, `GetRef`, `Resolve`, `ResolveObject`, `GetObject`, `Peel` and `ParseAdvertisement`, which behave like their JavaScript counterparts. It is safe for concurrent use. Names, emails and messages hold the raw bytes from the object. Protocol failures are `*gitremoterefs.Error` values with a `Code`, a `Status` for HTTP failures and a `Detail`.
 
 ## WebAssembly component
 
