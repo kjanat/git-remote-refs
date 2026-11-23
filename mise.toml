@@ -33,6 +33,10 @@ outdir    = "wasm"
 component = "go/git-remote-refs.wasm"
 rustflags = "--remap-path-prefix={{env.HOME}}=~ --remap-path-prefix={{config_root}}=."
 
+[deps]
+npm.auto = true
+go.auto  = true
+
 [tasks]
 jstest.run    = "node --test index.test.ts"
 jstypes.run   = "tsrs -p tsconfig.json"
