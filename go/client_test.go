@@ -410,6 +410,49 @@ func TestPeel(t *testing.T) {
 	wantCode(t, err, CodeInvalidObjectID, 0, "")
 }
 
+func TestResponseLimit(t *testing.T) {
+	const contentType = "application/x-git-upload-pack-advertisement"
+	advertisement := append(pkt([]byte("version 2\n")), "0000"...)
+	ctx := context.Background()
+	client, err := NewWithOptions(ctx, http.DefaultClient, ClientOptions{MaxResponseBytes: int64(len(advertisement))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := client.Close(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   []byte
+		code   Code
+		detail string
+	}{
+		{"exact", http.StatusOK, advertisement, CodeUnsupportedFeature, "ls-refs"},
+		{"oversized", http.StatusOK, append(bytes.Clone(advertisement), 'x'), CodeLimitExceeded, fmt.Sprintf("HTTP response exceeds %d bytes", len(advertisement))},
+		{"http error", http.StatusNotFound, append(bytes.Clone(advertisement), 'x'), CodeNotFound, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := serve(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", contentType)
+				w.WriteHeader(tc.status)
+				w.(http.Flusher).Flush()
+				if _, err := w.Write(tc.body); err != nil {
+					t.Error(err)
+				}
+			})
+			_, err := client.ListRefs(ctx, repo(server, "sha1"))
+			status := 0
+			if tc.status != http.StatusOK {
+				status = tc.status
+			}
+			wantCode(t, err, tc.code, status, tc.detail)
+		})
+	}
+}
+
 func TestErrors(t *testing.T) {
 	ctx := context.Background()
 	_, err := shared.ListRefs(ctx, "ssh://example.com/repo")

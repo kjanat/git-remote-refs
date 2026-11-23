@@ -203,6 +203,29 @@ test('peel follows nested tags to their target', async () => {
 	await assert.rejects(peel(repo('deep'), rev('deep', 't16'), { fetch }), { code: 'limit-exceeded' });
 });
 
+test('HTTP response limit caps streaming bodies before parsing', async () => {
+	const source = backend({ v2: false });
+	const repository = repo('sha1');
+	const response = await source(`${repository}/info/refs?service=git-upload-pack`, { method: 'GET' });
+	const advertisement = new Uint8Array(await response.arrayBuffer());
+	assert((await listRefs(repository, { fetch: source, maxResponseBytes: advertisement.byteLength })).refs.has('HEAD'));
+
+	let cancelled = false;
+	const oversized: Fetch = () => new Response(new ReadableStream<Uint8Array>({
+		start(controller) {
+			controller.enqueue(new Uint8Array(3));
+			controller.enqueue(new Uint8Array(3));
+		},
+		cancel() {
+			cancelled = true;
+		},
+	}));
+	await assert.rejects(listRefs(repository, { fetch: oversized, maxResponseBytes: 5 }), { code: 'limit-exceeded' });
+	assert(cancelled);
+	const httpError: Fetch = () => new Response('oversized error page', { status: 404 });
+	await assert.rejects(listRefs(repository, { fetch: httpError, maxResponseBytes: 5 }), { code: 'not-found', status: 404 });
+});
+
 test('requests carry the caller signal', async () => {
 	const controller = new AbortController();
 	const seen: Array<AbortSignal | null | undefined> = [];

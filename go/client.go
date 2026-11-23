@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"time"
 
@@ -19,13 +20,21 @@ import (
 var component []byte
 
 const maxTagChain = 16
+const defaultMaxResponseBytes = 64 << 20
+
+// ClientOptions configures the client's HTTP response limit.
+type ClientOptions struct {
+	// MaxResponseBytes limits each HTTP response. Zero selects 64 MiB.
+	MaxResponseBytes int64
+}
 
 type Client struct {
-	http     *http.Client
-	engine   *wacogo.Engine
-	factory  *git.Factory
-	compiled *wacogo.Component
-	adapt    func(git.Git) git.Git
+	maxResponseBytes int64
+	http             *http.Client
+	engine           *wacogo.Engine
+	factory          *git.Factory
+	compiled         *wacogo.Component
+	adapt            func(git.Git) git.Git
 }
 
 type stub struct{ git.Git }
@@ -37,7 +46,19 @@ type instance struct {
 }
 
 func New(ctx context.Context, httpClient *http.Client) (*Client, error) {
-	c := &Client{http: httpClient, engine: wacogo.NewEngine(ctx)}
+	return NewWithOptions(ctx, httpClient, ClientOptions{})
+}
+
+// NewWithOptions creates a client with a custom HTTP response limit.
+func NewWithOptions(ctx context.Context, httpClient *http.Client, options ClientOptions) (*Client, error) {
+	maxResponseBytes := options.MaxResponseBytes
+	if maxResponseBytes == 0 {
+		maxResponseBytes = defaultMaxResponseBytes
+	}
+	if maxResponseBytes < 0 || maxResponseBytes == math.MaxInt64 {
+		return nil, fmt.Errorf("git-remote-refs: invalid MaxResponseBytes: %d", options.MaxResponseBytes)
+	}
+	c := &Client{http: httpClient, engine: wacogo.NewEngine(ctx), maxResponseBytes: maxResponseBytes}
 	if err := c.load(ctx); err != nil {
 		return nil, errors.Join(err, c.Close(ctx))
 	}
@@ -216,10 +237,11 @@ func candidates(ctx context.Context, g git.Git, name string) ([]string, error) {
 }
 
 type session struct {
-	ctx    context.Context
-	http   *http.Client
-	git    git.Git
-	remote *git.RemoteHandle
+	maxResponseBytes int64
+	ctx              context.Context
+	http             *http.Client
+	git              git.Git
+	remote           *git.RemoteHandle
 }
 
 func (c *Client) session(ctx context.Context, repository string, work func(*session) error) error {
@@ -229,7 +251,7 @@ func (c *Client) session(ctx context.Context, repository string, work func(*sess
 			return err
 		}
 		defer func() { err = errors.Join(err, remote.Drop(context.WithoutCancel(ctx))) }()
-		s := &session{ctx: ctx, http: c.http, git: g, remote: remote}
+		s := &session{ctx: ctx, http: c.http, git: g, remote: remote, maxResponseBytes: c.maxResponseBytes}
 		if err := s.discover(); err != nil {
 			return err
 		}
@@ -386,11 +408,22 @@ func (s *session) exchange(request git.Request) (git.Response, error) {
 	if err != nil {
 		return git.Response{}, err
 	}
-	data, err := io.ReadAll(resp.Body)
+	response := git.Response{Status: uint16(resp.StatusCode)}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_ = resp.Body.Close()
+		return response, nil
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, s.maxResponseBytes+1))
 	if err = errors.Join(err, resp.Body.Close()); err != nil {
 		return git.Response{}, err
 	}
-	response := git.Response{Status: uint16(resp.StatusCode), Body: data}
+	if int64(len(data)) > s.maxResponseBytes {
+		return git.Response{}, &Error{
+			Code:   CodeLimitExceeded,
+			Detail: fmt.Sprintf("HTTP response exceeds %d bytes", s.maxResponseBytes),
+		}
+	}
+	response.Body = data
 	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
 		response.ContentType = git.SomeString(contentType)
 	}

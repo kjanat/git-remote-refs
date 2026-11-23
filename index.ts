@@ -27,6 +27,8 @@ export type {
 export interface RemoteOptions {
 	fetch?: (url: string, init: RequestInit) => Response | Promise<Response>;
 	signal?: AbortSignal;
+	/** Maximum bytes read from each HTTP response. Defaults to 64 MiB. */
+	maxResponseBytes?: number;
 }
 
 export interface ListRefsOptions extends RemoteOptions {
@@ -44,6 +46,7 @@ type Reply = [status: number, contentType: string | null, body: Uint8Array];
 type Exchange = (request: GitRequest) => Promise<Reply>;
 
 const MAX_TAG_CHAIN = 16;
+const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
 
 let initialization: Promise<InitOutput> | undefined;
 
@@ -65,12 +68,50 @@ export function init(input?: InitArgument): Promise<InitOutput> {
 	return initialization;
 }
 
+async function readResponse(response: Response, maxBytes: number): Promise<Uint8Array> {
+	const { body } = response;
+	if (!body) return new Uint8Array();
+	if (!response.ok) {
+		void body.cancel().catch(() => {});
+		return new Uint8Array();
+	}
+	const reader = body.getReader();
+	const chunks: Uint8Array[] = [];
+	let length = 0;
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			length += value.byteLength;
+			if (length > maxBytes) {
+				void reader.cancel().catch(() => {});
+				throw Object.assign(new Error(`limit exceeded: HTTP response exceeds ${maxBytes} bytes`), {
+					code: 'limit-exceeded',
+				});
+			}
+			chunks.push(value);
+		}
+	} finally {
+		reader.releaseLock();
+	}
+	const bytes = new Uint8Array(length);
+	let offset = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return bytes;
+}
+
 async function session<T>(
 	repository: string | URL,
 	options: RemoteOptions | undefined,
 	work: (remote: Remote, exchange: Exchange) => Promise<T>,
 ): Promise<T> {
-	const { fetch = globalThis.fetch, signal } = options ?? {};
+	const { fetch = globalThis.fetch, signal, maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES } = options ?? {};
+	if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1) {
+		throw new RangeError('maxResponseBytes must be a positive safe integer');
+	}
 	await init();
 	const remote = new Remote(String(repository));
 	const exchange: Exchange = async request => {
@@ -80,7 +121,7 @@ async function session<T>(
 			...(request.body && { body: new Uint8Array(request.body) }),
 			...(signal && { signal }),
 		});
-		return [response.status, response.headers.get('content-type'), new Uint8Array(await response.arrayBuffer())];
+		return [response.status, response.headers.get('content-type'), await readResponse(response, maxResponseBytes)];
 	};
 	try {
 		remote.acceptDiscovery(...(await exchange(remote.discoveryRequest())));
