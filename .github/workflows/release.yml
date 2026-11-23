@@ -134,7 +134,7 @@ jobs:
         if: env.DRY_RUN == 'true'
         run: cargo publish --locked --dry-run --package git-remote-refs
 
-      - uses: kjanat/beepboop/actions/begin@6a16e1e7731247f029348aab8fa2e3e8990763ef # v1.10.20
+      - uses: kjanat/beepboop/actions/begin@v1
         id: beepboop
         if: env.DRY_RUN == 'false' && steps.registry.outputs.published == 'false'
         with:
@@ -147,7 +147,7 @@ jobs:
         if: steps.beepboop.outcome == 'success'
         continue-on-error: true
 
-      - uses: kjanat/beepboop/actions/credentials@6a16e1e7731247f029348aab8fa2e3e8990763ef # v1.10.20
+      - uses: kjanat/beepboop/actions/credentials@v1
         id: credentials
         if: steps.auth.outcome == 'failure'
         with:
@@ -170,7 +170,7 @@ jobs:
           fi
           exit "$code"
 
-      - uses: kjanat/beepboop/actions/report@6a16e1e7731247f029348aab8fa2e3e8990763ef # v1.10.20
+      - uses: kjanat/beepboop/actions/report@v1
         if: ${{ !cancelled() && steps.beepboop.outcome == 'success' }}
         with:
           execution-id: ${{ steps.beepboop.outputs.execution-id }}
@@ -228,7 +228,7 @@ jobs:
         if: env.DRY_RUN == 'true'
         run: npm publish "./packages/git-remote-refs-$VERSION.tgz" --dry-run --access public --ignore-scripts
 
-      - uses: kjanat/beepboop/actions/begin@6a16e1e7731247f029348aab8fa2e3e8990763ef # v1.10.20
+      - uses: kjanat/beepboop/actions/begin@v1
         id: beepboop
         if: env.DRY_RUN == 'false' && steps.registry.outputs.published == 'false'
         with:
@@ -251,7 +251,7 @@ jobs:
           fi
           exit "$code"
 
-      - uses: kjanat/beepboop/actions/credentials@6a16e1e7731247f029348aab8fa2e3e8990763ef # v1.10.20
+      - uses: kjanat/beepboop/actions/credentials@v1
         id: credentials
         if: steps.oidc.outcome == 'failure'
         with:
@@ -274,7 +274,7 @@ jobs:
           fi
           exit "$code"
 
-      - uses: kjanat/beepboop/actions/report@6a16e1e7731247f029348aab8fa2e3e8990763ef # v1.10.20
+      - uses: kjanat/beepboop/actions/report@v1
         if: ${{ !cancelled() && steps.beepboop.outcome == 'success' }}
         with:
           execution-id: ${{ steps.beepboop.outputs.execution-id }}
