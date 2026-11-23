@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
 import { deflateSync } from 'node:zlib';
 import type { RemoteOptions } from './index.js';
 import { getObject, getRef, listRefs, parseAdvertisement, peel, resolve } from './index.js';
@@ -211,17 +212,23 @@ test('HTTP response limit caps streaming bodies before parsing', async () => {
 	const exact: Fetch = () => {
 		const chunk = new Uint8Array(1);
 		let offset = 0;
-		return new Response(new ReadableStream<Uint8Array>({
-			pull(controller) {
-				if (offset === advertisement.byteLength) {
-					controller.close();
-					return;
-				}
-				chunk.set(advertisement.subarray(offset, offset + 1));
-				offset++;
-				controller.enqueue(chunk);
-			},
-		}, { highWaterMark: 0 }), { headers: response.headers });
+		return new Response(
+			new ReadableStream<Uint8Array>(
+				{
+					pull(controller) {
+						if (offset === advertisement.byteLength) {
+							controller.close();
+							return;
+						}
+						chunk.set(advertisement.subarray(offset, offset + 1));
+						offset++;
+						controller.enqueue(chunk);
+					},
+				},
+				{ highWaterMark: 0 },
+			),
+			{ headers: response.headers },
+		);
 	};
 	assert((await listRefs(repository, { fetch: exact, maxResponseBytes: advertisement.byteLength })).refs.has('HEAD'));
 
@@ -238,17 +245,77 @@ test('HTTP response limit caps streaming bodies before parsing', async () => {
 	await assert.rejects(listRefs(repository, { fetch: oversized, maxResponseBytes: 5 }), { code: 'limit-exceeded' });
 	assert(cancelled);
 	let errorCancelled = false;
-	const httpError: Fetch = () => new Response(new ReadableStream<Uint8Array>({
-		pull() {
-			assert.fail('HTTP error body should not be read');
-		},
-		cancel() {
-			errorCancelled = true;
-			return Promise.reject(new Error('cancel failed'));
-		},
-	}, { highWaterMark: 0 }), { status: 404 });
-	await assert.rejects(listRefs(repository, { fetch: httpError, maxResponseBytes: 5 }), { code: 'not-found', status: 404 });
+	const httpError: Fetch = () =>
+		new Response(
+			new ReadableStream<Uint8Array>(
+				{
+					pull() {
+						assert.fail('HTTP error body should not be read');
+					},
+					cancel() {
+						errorCancelled = true;
+						return Promise.reject(new Error('cancel failed'));
+					},
+				},
+				{ highWaterMark: 0 },
+			),
+			{ status: 404 },
+		);
+	await assert.rejects(listRefs(repository, { fetch: httpError, maxResponseBytes: 5 }), {
+		code: 'not-found',
+		status: 404,
+	});
 	assert(errorCancelled);
+});
+
+test('HTTP response limit accepts zero and rejects invalid values', async () => {
+	const source = backend({ v2: false });
+	assert((await listRefs(repo('sha1'), { fetch: source, maxResponseBytes: 0 })).refs.has('HEAD'));
+	for (const maxResponseBytes of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+		await assert.rejects(listRefs(repo('sha1'), { fetch: source, maxResponseBytes }), {
+			name: 'RangeError',
+			message: 'maxResponseBytes must be zero or a positive safe integer',
+		});
+	}
+});
+
+test('HTTP response bodies must be Uint8Array streams', async () => {
+	const repository = repo('sha1');
+	const response = await backend({ v2: false })(`${repository}/info/refs?service=git-upload-pack`, { method: 'GET' });
+	const advertisement = new Uint8Array(await response.arrayBuffer());
+	const foreign: Fetch = () =>
+		new Response(
+			new ReadableStream({
+				start(controller) {
+					controller.enqueue(runInNewContext('Uint8Array.from(bytes)', { bytes: Array.from(advertisement) }));
+					controller.close();
+				},
+			}),
+			{ headers: response.headers },
+		);
+	assert((await listRefs(repository, { fetch: foreign })).refs.has('HEAD'));
+
+	let cancelled = false;
+	const text: Fetch = () =>
+		new Response(
+			new ReadableStream({
+				start(controller) {
+					controller.enqueue('version 2');
+				},
+				cancel() {
+					cancelled = true;
+				},
+			}),
+			{ headers: response.headers },
+		);
+	await assert.rejects(listRefs(repository, { fetch: text }), {
+		name: 'TypeError',
+		message: 'HTTP response body must yield Uint8Array chunks',
+	});
+	assert(cancelled);
+
+	const empty: Fetch = () => new Response(null, { headers: response.headers });
+	await assert.rejects(listRefs(repository, { fetch: empty }), { code: 'protocol' });
 });
 
 test('requests carry the caller signal', async () => {

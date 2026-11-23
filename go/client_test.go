@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/cgi"
 	"net/http/httptest"
@@ -495,6 +496,19 @@ func TestResponseLimitWithBodyErrors(t *testing.T) {
 	}
 	if body.bytes != 6 || !body.closed {
 		t.Fatalf("read %d bytes, closed = %t", body.bytes, body.closed)
+	}
+}
+
+func TestResponseLimitOptions(t *testing.T) {
+	if shared.maxResponseBytes != defaultMaxResponseBytes {
+		t.Fatalf("default limit = %d, want %d", shared.maxResponseBytes, defaultMaxResponseBytes)
+	}
+	for _, limit := range []int64{-1, math.MaxInt64} {
+		client, err := NewWithOptions(context.Background(), http.DefaultClient, ClientOptions{MaxResponseBytes: limit})
+		want := fmt.Sprintf("git-remote-refs: invalid MaxResponseBytes: %d", limit)
+		if client != nil || err == nil || err.Error() != want {
+			t.Fatalf("NewWithOptions(%d) = %v, %v, want nil, %q", limit, client, err, want)
+		}
 	}
 }
 

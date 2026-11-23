@@ -20,11 +20,11 @@ import (
 var component []byte
 
 const maxTagChain = 16
-const defaultMaxResponseBytes = 64 << 20
+const defaultMaxResponseBytes = 264 << 20
 
-// ClientOptions configures the client's HTTP response limit.
+// ClientOptions configures a Client.
 type ClientOptions struct {
-	// MaxResponseBytes limits the body size of each successful HTTP response. Zero selects 64 MiB.
+	// MaxResponseBytes limits the body size of each successful HTTP response. Zero selects 264 MiB.
 	MaxResponseBytes int64
 }
 
@@ -49,7 +49,7 @@ func New(ctx context.Context, httpClient *http.Client) (*Client, error) {
 	return NewWithOptions(ctx, httpClient, ClientOptions{})
 }
 
-// NewWithOptions creates a client with a custom HTTP response limit.
+// NewWithOptions creates a Client from options.
 func NewWithOptions(ctx context.Context, httpClient *http.Client, options ClientOptions) (*Client, error) {
 	maxResponseBytes := options.MaxResponseBytes
 	if maxResponseBytes == 0 {

@@ -27,7 +27,7 @@ export type {
 export interface RemoteOptions {
 	fetch?: (url: string, init: RequestInit) => Response | Promise<Response>;
 	signal?: AbortSignal;
-	/** Maximum body size in bytes for each successful HTTP response. Defaults to 64 MiB. */
+	/** Maximum body size in bytes for each successful HTTP response. Zero or omitted selects 264 MiB. */
 	maxResponseBytes?: number;
 }
 
@@ -46,7 +46,7 @@ type Reply = [status: number, contentType: string | null, body: Uint8Array];
 type Exchange = (request: GitRequest) => Promise<Reply>;
 
 const MAX_TAG_CHAIN = 16;
-const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
+const DEFAULT_MAX_RESPONSE_BYTES = 264 * 1024 * 1024;
 
 let initialization: Promise<InitOutput> | undefined;
 
@@ -116,9 +116,10 @@ async function session<T>(
 	options: RemoteOptions | undefined,
 	work: (remote: Remote, exchange: Exchange) => Promise<T>,
 ): Promise<T> {
-	const { fetch = globalThis.fetch, signal, maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES } = options ?? {};
+	const { fetch = globalThis.fetch, signal, maxResponseBytes: requested = 0 } = options ?? {};
+	const maxResponseBytes = requested === 0 ? DEFAULT_MAX_RESPONSE_BYTES : requested;
 	if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1) {
-		throw new RangeError('maxResponseBytes must be a positive safe integer');
+		throw new RangeError('maxResponseBytes must be zero or a positive safe integer');
 	}
 	await init();
 	const remote = new Remote(String(repository));
