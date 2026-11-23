@@ -67,7 +67,7 @@ let resolution = resolve(&refs, name)?;
 
 On protocol v2, `candidates` gives you every name `resolve` checks. Pass the same prefixes to `ls_refs_request` and `parse_ls_refs` so `resolve` knows which names the listing covered. If a candidate is absent and its name was outside the requested prefixes, `resolve` returns `Resolution::Incomplete`.
 
-`fetch_request` and `parse_fetch` download and verify objects, and `Limits` caps how many objects and bytes a response may hold.
+Use `Remote::fetch_request` to build an object request and `parse_fetch` to verify and unpack the server's response. `Limits` caps the object count and unpacked data size.
 
 ## Go
 
