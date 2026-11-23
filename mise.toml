@@ -9,11 +9,22 @@ cargo-binstall                     = "1.28.0"
 "npm:tsrs"                         = "7.1.0-beta.tsrs4"
 wasm-tools                         = "1.263.0"
 go                                 = "1.27.4"
+golangci-lint                      = "2.15.0"
 "npm:@kjanat/fmt"                  = {
   version               = "0.64.1",
   trust_policy_excludes = ["@kprint/*", "@kjanat/*"],
   allow_low_downloads   = true,
 }
+"npm:@kjanat/beepboop"             = {
+  version             = "0.7.2",
+  allow_low_downloads = true,
+  auto_update         = true,
+  lazy_bins           = "beepboop",
+  lazy                = true
+}
+
+[settings]
+idiomatic_version_file_enable_tools = ["go", "rust", "node", "bun"]
 
 [vars]
 target    = "wasm32-unknown-unknown"
@@ -22,21 +33,24 @@ outdir    = "wasm"
 component = "go/git-remote-refs.wasm"
 rustflags = "--remap-path-prefix={{env.HOME}}=~ --remap-path-prefix={{config_root}}=."
 
-[tasks.fmt]
-alias = ["f", "format"]
-run   = "kfmt"
+[tasks]
+jstest.run    = "node --test index.test.ts"
+jstypes.run   = "tsrs -p tsconfig.json"
+rstest.run    = "cargo nextest run --workspace"
+fmt           = { run = "kfmt", alias = ["f", "format"] }
+golint.run    = "golangci-lint run ./go/..."
+gotest.run    = "go test -race ./go/..."
+"go:generate" = { run = "go -C go generate ./..." }
 
 [tasks.test]
 run     = [
-  "tsrs --project tsconfig.json",
-  "cargo nextest run --workspace",
-  "node --test index.test.ts",
-  "go -C go test -race ./...",
+  { task = "jstypes" },
+  { task = "jstest" },
+  { task = "rstest" },
+  { task = "gotest" },
+  { task = "golint" },
 ]
 depends = ["build", "component:build"]
-
-[tasks."go:generate"]
-run = "go -C go generate ./..."
 
 [tasks."cargo:build"]
 vars = { cargo_locked = "{% if env.CI | default(value='false') == 'true' %} --locked{% endif %}" }
