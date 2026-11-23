@@ -33,6 +33,11 @@ export interface ListRefsOptions extends RemoteOptions {
 	prefixes?: string[];
 }
 
+export interface ResolvedObject {
+	resolution: Resolution;
+	object: GitObject | undefined;
+}
+
 export interface Peeled {
 	chain: GitObject[];
 	target: GitObject;
@@ -112,10 +117,25 @@ export function getRef(repository: string | URL, name: string, options?: RemoteO
 	);
 }
 
+async function resolveName(remote: Remote, exchange: Exchange, name: string): Promise<Resolution> {
+	await list(remote, exchange, candidates(name));
+	return remote.resolve(name);
+}
+
 export function resolve(repository: string | URL, name: string, options?: RemoteOptions): Promise<Resolution> {
+	return session(repository, options, (remote, exchange) => resolveName(remote, exchange, name));
+}
+
+/** Resolve a name and fetch its exact object in a single discovery session. */
+export function resolveObject(repository: string | URL, name: string, options?: RemoteOptions): Promise<ResolvedObject> {
 	return session(repository, options, async (remote, exchange) => {
-		await list(remote, exchange, candidates(name));
-		return remote.resolve(name);
+		const resolution = await resolveName(remote, exchange, name);
+		if (resolution.kind !== 'ref' && resolution.kind !== 'object') {
+			return { resolution, object: undefined };
+		}
+		const oid = resolution.kind === 'ref' ? resolution.ref.oid : resolution.oid;
+		const { wanted: [object] } = await fetchObjects(remote, exchange, [oid]);
+		return { resolution, object };
 	});
 }
 

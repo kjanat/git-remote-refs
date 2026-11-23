@@ -5,7 +5,7 @@ import { before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import type { RemoteOptions } from './index.js';
-import { getObject, getRef, listRefs, parseAdvertisement, peel, resolve } from './index.js';
+import { getObject, getRef, listRefs, parseAdvertisement, peel, resolve, resolveObject } from './index.js';
 
 type Fetch = NonNullable<RemoteOptions['fetch']>;
 
@@ -112,6 +112,31 @@ test('resolve follows Git order and reports other matches', async () => {
 	});
 	assert.deepEqual(await resolve(repo('sha1'), 'missing', { fetch }), { kind: 'not-found' });
 	await assert.rejects(resolve(repo('sha1'), 'v2^{}', { fetch }), { code: 'invalid-ref-name' });
+});
+
+test('resolveObject fetches the exact object using one discovery', async () => {
+	const methods: string[] = [];
+	const counting: Fetch = (url, init) => {
+		methods.push(init.method ?? 'GET');
+		return fetch(url, init);
+	};
+	const { resolution, object } = await resolveObject(repo('sha1'), 'annotated', { fetch: counting });
+	assert.equal(resolution.kind, 'ref');
+	assert.equal(object?.kind, 'tag');
+	assert.equal(object.oid, rev('sha1', 'refs/tags/annotated'));
+	assert.deepEqual(methods, ['GET', 'POST', 'POST']);
+
+	methods.length = 0;
+	assert.deepEqual(await resolveObject(repo('sha1'), 'missing', { fetch: counting }), {
+		resolution: { kind: 'not-found' },
+		object: undefined,
+	});
+	assert.deepEqual(methods, ['GET', 'POST']);
+
+	const oid = rev('sha1', 'main');
+	const result = await resolveObject(repo('sha1'), oid, { fetch });
+	assert.equal(result.resolution.kind, 'object');
+	assert.equal(result.object?.oid, oid);
 });
 
 test('getObject returns verified commits', async () => {

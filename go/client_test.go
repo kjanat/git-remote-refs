@@ -305,6 +305,38 @@ func TestResolve(t *testing.T) {
 	wantCode(t, err, CodeInvalidRefName, 0, "")
 }
 
+func TestResolveObject(t *testing.T) {
+	var requests atomic.Int32
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		backend.ServeHTTP(w, r)
+	})
+	ctx := context.Background()
+	resolved, err := shared.ResolveObject(ctx, repo(server, "sha1"), "annotated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match, ok := resolved.Resolution.(*RefMatch); !ok || match.Name != "refs/tags/annotated" {
+		t.Fatalf("resolution = %#v, want annotated ref", resolved.Resolution)
+	}
+	if tag, ok := resolved.Object.(*Tag); !ok || tag.OID != rev(t, "sha1", "refs/tags/annotated") {
+		t.Fatalf("object = %#v, want annotated tag", resolved.Object)
+	}
+	if count := requests.Swap(0); count != 3 {
+		t.Fatalf("requests = %d, want 3", count)
+	}
+	resolved, err = shared.ResolveObject(ctx, repo(server, "sha1"), "missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := resolved.Resolution.(*NotFound); !ok || resolved.Object != nil {
+		t.Fatalf("resolved = %#v, want NotFound without an object", resolved)
+	}
+	if count := requests.Load(); count != 2 {
+		t.Fatalf("requests = %d, want 2", count)
+	}
+}
+
 func TestGetObject(t *testing.T) {
 	ctx := context.Background()
 	main := rev(t, "sha1", "main")
