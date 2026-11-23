@@ -60,3 +60,57 @@ run  = [
   "cargo build{{vars.cargo_locked}} --package git-remote-refs-component --profile {{vars.profile}} --target {{vars.target}}",
   "wasm-tools component new target/{{vars.target}}/{{vars.profile}}/git_remote_refs_component.wasm --output {{vars.component}}",
 ]
+
+[tasks.version]
+description = "Set the version in the manifests and lockfiles"
+usage       = 'arg "<version>" help="MAJOR.MINOR.PATCH"'
+run         = '''
+#!/usr/bin/env bash
+set -euo pipefail
+version="$usage_version"
+if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+  echo "error: $version is not MAJOR.MINOR.PATCH" >&2
+  exit 1
+fi
+sed --in-place --regexp-extended "s/^(package\.version +=) \"[^\"]*\"/\1 \"$version\"/" Cargo.toml
+if [[ "$(yq --input-format toml --output-format yaml '.workspace.package.version' Cargo.toml)" != "$version" ]]; then
+  echo "error: Cargo.toml has no workspace package.version line to update" >&2
+  exit 1
+fi
+cargo update --workspace
+npm version "$version" --no-git-tag-version --allow-same-version --ignore-scripts
+'''
+
+[tasks.release]
+description = "Tag the version on master with signed v and go/v tags and push them"
+usage       = '''
+arg "<version>" help="Version in the manifests, without the v"
+arg "[summary]" help="Summary line for the tag message"
+'''
+run         = '''
+#!/usr/bin/env bash
+set -euo pipefail
+version="$usage_version"
+summary="${usage_summary:-}"
+tag="v$version"
+fail() {
+  echo "error: $1" >&2
+  exit 1
+}
+[[ "$(git branch --show-current)" == master ]] || fail "check out master first"
+git diff --quiet && git diff --cached --quiet || fail "commit or stash your changes first"
+git fetch --quiet origin master
+[[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/master)" ]] || fail "master differs from origin/master"
+cargo="$(yq --input-format toml --output-format yaml '.workspace.package.version' Cargo.toml)"
+npm="$(jq --raw-output .version package.json)"
+[[ "$cargo" == "$version" && "$npm" == "$version" ]] || fail "Cargo.toml has $cargo and package.json has $npm, run mise run version $version and commit it"
+for name in "$tag" "go/$tag"; do
+  ! git show-ref --quiet --verify "refs/tags/$name" || fail "$name exists locally"
+  [[ -z "$(git ls-remote --tags origin "refs/tags/$name")" ]] || fail "$name exists on origin"
+done
+message=("$tag")
+[[ -z "$summary" ]] || message+=("$summary")
+git tag --sign "$tag" --file <(printf '%s\n\n' "${message[@]}")
+git tag --sign "go/$tag" --file <(printf '%s\n\n' "${message[@]}")
+git push --atomic origin "refs/tags/$tag" "refs/tags/go/$tag"
+'''

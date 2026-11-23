@@ -1,6 +1,14 @@
 # git-remote-refs
 
-Read refs and objects from any Git smart HTTP server without credentials, the way `git ls-remote` and `git fetch` do. Works with GitHub, GitLab, Gitea, Forgejo and self-hosted Git.
+Read refs and objects from a Git repository over smart HTTP, the way `git ls-remote` and `git fetch` do, without cloning it. It works with GitHub, GitLab, Gitea, Forgejo and any self-hosted Git server, and needs no credentials for public repositories.
+
+One Rust core ships four ways: an npm package, a Rust crate, a WebAssembly component and a Go module.
+
+## JavaScript
+
+```sh
+npm install git-remote-refs
+```
 
 ```js
 import { getObject, resolve } from 'git-remote-refs';
@@ -9,53 +17,85 @@ const repo = 'https://github.com/denoland/setup-deno.git';
 const v2 = await resolve(repo, 'v2');
 // { kind: 'ref', name: 'refs/heads/v2', ref: { oid: '22d081ff…' }, others: [] }
 const commit = await getObject(repo, v2.ref.oid);
-// { kind: 'commit', tree, parents, author, committer, message, … }
+// { kind: 'commit', oid, tree, parents, author, committer, message }
 ```
 
-## JavaScript API
+| Function                       | Returns                                                                                                                           |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `listRefs(repo, { prefixes })` | Every advertised ref with its `oid`, `peeled` tag target and `symrefTarget`, plus unborn symrefs such as `HEAD` of an empty repo. |
+| `getRef(repo, name)`           | The ref with exactly this full name, or `undefined`.                                                                              |
+| `resolve(repo, name)`          | The ref Git's `rev-parse` would pick for a short name, or the object for a full object ID.                                        |
+| `getObject(repo, oid)`         | The commit, tag, tree or blob with this ID, checked against its hash.                                                             |
+| `peel(repo, oid)`              | The chain of tags from `oid` to the first object that is not a tag.                                                               |
+| `parseAdvertisement(bytes)`    | The refs in a saved `info/refs` response.                                                                                         |
 
-| Function                       | Result                                                                                                                                                                        |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `listRefs(repo, { prefixes })` | `RefList`: every advertised ref with `oid`, `peeled` and `symrefTarget`, unborn symrefs, and the `prefixes` the listing covers (`null` for all refs).                         |
-| `getRef(repo, name)`           | The ref with exactly this full name, or `undefined`.                                                                                                                          |
-| `resolve(repo, name)`          | Git's `rev-parse` lookup order: `name`, `refs/name`, `refs/tags/name`, `refs/heads/name`, `refs/remotes/name`, `refs/remotes/name/HEAD`. A full object ID resolves to itself. |
-| `getObject(repo, oid)`         | A commit, tag, tree or blob whose bytes hash to `oid`.                                                                                                                        |
-| `peel(repo, oid)`              | The tag chain from `oid` to its first non-tag object, up to 16 objects.                                                                                                       |
-| `parseAdvertisement(bytes)`    | A `RefList` from saved `info/refs` bytes.                                                                                                                                     |
+`resolve` tries `name`, `refs/name`, `refs/tags/name`, `refs/heads/name`, `refs/remotes/name` and `refs/remotes/name/HEAD` in that order. It returns `{ kind: 'ref', name, ref, others }`, `{ kind: 'object', oid, refs }` or `{ kind: 'not-found' }`. Revision syntax such as `v2^{}` fails with `invalid-ref-name`.
 
-`resolve` returns `{ kind: 'ref', name, ref, others }`, where `others` lists the lower-priority refs with the same short name. It returns `{ kind: 'object', oid, refs }` for a full object ID, and `{ kind: 'not-found' }` otherwise. Revision syntax such as `v2^{}` fails with `invalid-ref-name`, and an abbreviated object ID is looked up as a ref name.
+Every function accepts `{ fetch, signal }` for a custom HTTP client and cancellation. Errors carry a `code`, such as `not-found`, `auth-required` or `remote`, and HTTP failures carry a `status`. GitHub answers `401` for a missing repository.
 
-Every function takes `{ fetch, signal }` to supply an HTTP transport or cancel requests. Errors carry a `code` such as `not-found`, `auth-required`, `not-smart-http`, `unsupported-feature` or `remote`, and HTTP errors carry `status`. GitHub answers `401` for repositories that do not exist.
+Names, emails and messages are decoded as UTF-8. Text that is not valid UTF-8 also comes with its original bytes in `nameBytes`, `emailBytes` or `messageBytes`.
 
-Text in names, emails and messages is decoded as UTF-8. When the bytes are not valid UTF-8, the object also carries the original bytes in `nameBytes`, `emailBytes` or `messageBytes`, and commits report their `encoding` header.
+In a browser, serve the package's `wasm/` directory next to `index.js`, and route requests through an origin that allows cross-origin reads.
 
-Listing refs takes one request on protocol v0 servers and two on protocol v2 servers. With `prefixes`, a v2 server sends only matching refs. Objects need protocol v2 with shallow fetch. Servers with partial clone filters send the requested objects and the objects their tags point to. Other servers send the whole snapshot.
+## Rust
 
-`getObject` proves that the server has an object with that ID. GitHub serves objects from a repository's whole fork network, so `getObject` can return a commit that exists only in a fork. To show that a commit is part of the repository, find a branch or tag whose history reaches it.
+```sh
+cargo add git-remote-refs
+```
 
-In a browser, serve the generated `wasm/` directory alongside `index.js`, and route requests through an origin that permits cross-origin reads.
+The crate is `no_std` with `alloc` and does no I/O. It builds each HTTP request and parses each response, and you send the requests with any client. Here `send` stands for that client and returns the status, content type and body:
 
-## Rust crate
+```rust
+use git_remote_refs::{Discovery, Remote, Response, parse_discovery, parse_ls_refs, resolve};
 
-The `git-remote-refs` crate is `no_std` with `alloc` and performs no I/O. `Remote` builds each `Request`, the caller sends it, and `parse_discovery`, `parse_ls_refs` and `parse_fetch` read the `Response`. `resolve` and `candidates` implement the lookup order over a `RefList`. `Limits` bounds object count and size.
+let remote = Remote::new("https://github.com/denoland/setup-deno.git")?;
+let (status, content_type, body) = send(remote.discovery_request())?;
+let discovery = parse_discovery(&Response { status, content_type: content_type.as_deref(), body: &body })?;
+let refs = match discovery {
+    Discovery::V0(refs) => refs,
+    Discovery::V2(capabilities) => {
+        let prefixes = ["refs/heads/v2", "refs/tags/v2"];
+        let (status, content_type, body) = send(remote.ls_refs_request(&capabilities, &prefixes)?)?;
+        let response = Response { status, content_type: content_type.as_deref(), body: &body };
+        parse_ls_refs(&capabilities, &response, &prefixes)?
+    }
+};
+let resolution = resolve(&refs, "v2")?;
+```
 
-## WebAssembly component
+`fetch_request` and `parse_fetch` download and verify objects, and `Limits` caps how many objects and bytes a response may hold.
 
-`bindings/component` exports the same `Remote` API as a WebAssembly component. Its interface is `kjanat:git-remote-refs/git` in `bindings/component/wit/world.wit`. The component imports nothing, so the host sends each request and passes the response back. Errors are the `error` variant, and maps are lists of name and value pairs.
+## Go
 
-## Go module
+```sh
+go get github.com/kjanat/git-remote-refs/go
+```
 
 ```go
 import gitremoterefs "github.com/kjanat/git-remote-refs/go"
 
 client, err := gitremoterefs.New(ctx, http.DefaultClient)
+if err != nil {
+	return err
+}
 defer client.Close(ctx)
+
 resolution, err := client.Resolve(ctx, "https://github.com/denoland/setup-deno.git", "v2")
-// &gitremoterefs.RefMatch{Name: "refs/tags/v2", Ref: gitremoterefs.Ref{OID: "22d081ff…"}}
+// &gitremoterefs.RefMatch{Name: "refs/heads/v2", Ref: gitremoterefs.Ref{OID: "22d081ff…"}, Others: []string{}}
 ```
 
-The `go` module embeds the component and runs it in pure Go on wacogo and wazero. `Client` offers `ListRefs`, `GetRef`, `Resolve`, `GetObject`, `Peel` and `ParseAdvertisement` with the same semantics as the JavaScript API, and sends requests through the `http.Client` it was given. A `RefList` has nil `Prefixes` when it covers every ref. Names, emails and messages hold the raw bytes from the object. Failures from the Git protocol are `*gitremoterefs.Error` values with a `Code`, an HTTP `Status` where one applies, and a `Detail`.
+The module is pure Go and needs no cgo. `Client` has `ListRefs`, `GetRef`, `Resolve`, `GetObject`, `Peel` and `ParseAdvertisement`, which behave like their JavaScript counterparts. It is safe for concurrent use. Names, emails and messages hold the raw bytes from the object. Protocol failures are `*gitremoterefs.Error` values with a `Code`, a `Status` for HTTP failures and a `Detail`.
 
-## Development
+## WebAssembly component
 
-`mise run build` compiles `bindings/wasm` into `wasm/`, then compiles `index.ts` with tsrs into `index.js` and `index.d.ts`. `mise run component:build` writes the component to `go/git-remote-refs.wasm`, and `mise run go:generate` regenerates the Go bindings from the WIT. `mise run test` runs the Rust, component, JavaScript and Go suites against local repositories served by `git http-backend`.
+Each release attaches `git-remote-refs.component.wasm`, a component that exports the interface `kjanat:git-remote-refs/git` from [`bindings/component/wit/world.wit`](bindings/component/wit/world.wit). It imports nothing, so it runs in any component host. The component builds each request, the host sends it, and the host passes the response back.
+
+## Protocol notes
+
+Listing refs takes one request on protocol v0 servers and two on protocol v2 servers, and only v2 servers filter by prefix. Fetching objects needs protocol v2 with shallow fetch. Servers with partial clone filters send only the requested objects and the objects their tags point to. Other servers send the whole snapshot.
+
+GitHub serves objects from a repository's whole fork network, so `getObject` can return a commit that exists only in a fork. To prove a commit belongs to a repository, find a branch or tag whose history reaches it.
+
+## License
+
+MIT

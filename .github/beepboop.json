@@ -1,0 +1,30 @@
+{
+	"$schema": "https://beepboop.kjanat.dev/schema/v1.json",
+	"streams": {
+		"git-remote-refs": {
+			"packages": [
+				"pkg:cargo/git-remote-refs",
+				"pkg:npm/git-remote-refs",
+				"pkg:golang/github.com/kjanat/git-remote-refs/go"
+			],
+			"versionScope": "one-for-stream",
+			"mustPublish": [
+				"pkg:cargo/git-remote-refs",
+				"pkg:npm/git-remote-refs"
+			],
+			"credentials": ["crates-io", "npm-token"],
+			"workflows": {
+				"release": {
+					"file": "release.yml",
+					"mode": "observe",
+					"ref": "refs/tags/v*",
+					"publications": [
+						"pkg:cargo/git-remote-refs",
+						"pkg:npm/git-remote-refs"
+					]
+				}
+			}
+		}
+	},
+	"managers": ["cargo", "go", "npm", "workflow"]
+}
