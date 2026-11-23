@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      MISE_ENABLE_TOOLS: node,npm,github:wasm-bindgen/wasm-bindgen,npm:tsrs,wasm-tools,go
+      MISE_ENABLE_TOOLS: node,npm,github:wasm-bindgen/wasm-bindgen,npm:tsrs,wasm-tools,go,cargo-binstall,cargo:cargo-nextest,golangci-lint
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,11 +39,7 @@ jobs:
           git diff --exit-code
 
       - name: Test
-        run: |
-          tsrs --project tsconfig.json
-          cargo test --locked --workspace
-          node --test index.test.ts
-          go -C go test -race ./...
+        run: mise run test
 
       - name: Package
         run: |

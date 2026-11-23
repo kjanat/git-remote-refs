@@ -40,7 +40,8 @@ go.auto  = true
 [tasks]
 jstest.run    = "node --test index.test.ts"
 jstypes.run   = "tsrs -p tsconfig.json"
-rstest.run    = "cargo nextest run --workspace"
+rstest.vars   = { cargo_locked = "{% if env.CI | default(value='false') == 'true' %} --locked{% endif %}" }
+rstest.run    = "cargo nextest run{{vars.cargo_locked}} --workspace"
 fmt           = { run = "kfmt", alias = ["f", "format"] }
 golint.run    = "golangci-lint run ./go/..."
 gotest.run    = "go test -race ./go/..."
