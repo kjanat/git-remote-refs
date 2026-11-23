@@ -88,6 +88,7 @@ test('protocol v0 servers return the same listing', async () => {
 		['refs/heads/heads/x', 'refs/heads/main', 'refs/heads/v2', 'refs/heads/x'],
 	);
 	await assert.rejects(getObject(repo('sha1'), rev('sha1', 'main'), { fetch: v0 }), { code: 'unsupported-feature' });
+	await assert.rejects(resolveObject(repo('sha1'), 'main', { fetch: v0 }), { code: 'unsupported-feature' });
 });
 
 test('getRef looks up the exact name', async () => {
@@ -133,10 +134,20 @@ test('resolveObject fetches the exact object using one discovery', async () => {
 	});
 	assert.deepEqual(methods, ['GET', 'POST']);
 
-	const oid = rev('sha1', 'main');
-	const result = await resolveObject(repo('sha1'), oid, { fetch });
-	assert.equal(result.resolution.kind, 'object');
+	const oid = rev('sha256', 'main');
+	const result = await resolveObject(repo('sha256'), oid.toUpperCase(), { fetch });
+	assert.deepEqual(result.resolution, { kind: 'object', oid, refs: [] });
 	assert.equal(result.object?.oid, oid);
+
+	const ambiguous = await resolveObject(repo('sha1'), 'v2', { fetch });
+	assert.deepEqual(ambiguous.resolution, {
+		kind: 'ref',
+		name: 'refs/tags/v2',
+		ref: { oid: rev('sha1', 'refs/tags/v2') },
+		others: ['refs/heads/v2'],
+	});
+	assert.equal(ambiguous.object?.oid, rev('sha1', 'refs/tags/v2'));
+	await assert.rejects(resolveObject(repo('sha1'), '1'.repeat(40), { fetch }), { code: 'remote' });
 });
 
 test('getObject returns verified commits', async () => {

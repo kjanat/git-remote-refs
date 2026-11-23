@@ -267,6 +267,8 @@ func TestProtocolV0(t *testing.T) {
 	}
 	_, err = shared.GetObject(ctx, repo(v0, "sha1"), rev(t, "sha1", "main"))
 	wantCode(t, err, CodeUnsupportedFeature, 0, "Git protocol v2")
+	_, err = shared.ResolveObject(ctx, repo(v0, "sha1"), "main")
+	wantCode(t, err, CodeUnsupportedFeature, 0, "Git protocol v2")
 }
 
 func TestGetRef(t *testing.T) {
@@ -334,6 +336,25 @@ func TestResolveObject(t *testing.T) {
 	}
 	if count := requests.Load(); count != 2 {
 		t.Fatalf("requests = %d, want 2", count)
+	}
+
+	oid := rev(t, "sha256", "main")
+	resolved, err = shared.ResolveObject(ctx, repo(v2, "sha256"), strings.ToUpper(oid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(resolved.Resolution, &ObjectMatch{OID: oid, Refs: []string{}}) {
+		t.Fatalf("resolution = %#v, want object ID %s", resolved.Resolution, oid)
+	}
+	if commit, ok := resolved.Object.(*Commit); !ok || commit.OID != oid {
+		t.Fatalf("object = %#v, want commit %s", resolved.Object, oid)
+	}
+
+	unknown := strings.Repeat("1", 40)
+	resolved, err = shared.ResolveObject(ctx, repo(v2, "sha1"), unknown)
+	wantCode(t, err, CodeRemote, 0, "upload-pack: not our ref "+unknown)
+	if resolved != nil {
+		t.Fatalf("resolved = %#v, want nil on fetch failure", resolved)
 	}
 }
 
