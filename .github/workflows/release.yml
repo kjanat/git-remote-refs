@@ -18,6 +18,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
@@ -31,6 +35,7 @@ jobs:
       tag: ${{ steps.verify.outputs.tag }}
       version: ${{ steps.verify.outputs.version }}
       sha: ${{ steps.verify.outputs.sha }}
+      go-tag: ${{ steps.verify.outputs.go-tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,17 +48,24 @@ jobs:
           TAG: ${{ inputs.tag || github.ref_name }}
           OWNER: ${{ github.repository_owner }}
         run: |
-          set -euo pipefail
           version="${TAG#v}"
           if [[ "$TAG" != v* || ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "::error::$TAG is not a vMAJOR.MINOR.PATCH tag"
             exit 1
           fi
-          git fetch --no-tags origin "+refs/tags/$TAG:refs/tags/$TAG" "+refs/tags/go/$TAG:refs/tags/go/$TAG"
+          go_ref="refs/pending/go/$TAG"
+          if [[ -n "$(git ls-remote origin "refs/tags/go/$TAG")" ]]; then
+            go_ref="refs/tags/go/$TAG"
+          fi
+          git fetch --no-tags origin "+refs/tags/$TAG:refs/tags/$TAG" "+$go_ref:refs/tags/go/$TAG"
           curl --silent --show-error --fail --location "https://github.com/$OWNER.gpg" | gpg --batch --import
           for name in "$TAG" "go/$TAG"; do
             if [[ "$(git cat-file -t "refs/tags/$name")" != tag ]]; then
               echo "::error::$name is not an annotated tag"
+              exit 1
+            fi
+            if [[ "$(git for-each-ref --format='%(tag)' "refs/tags/$name")" != "$name" ]]; then
+              echo "::error::refs/tags/$name holds a tag object named $(git for-each-ref --format='%(tag)' "refs/tags/$name")"
               exit 1
             fi
             git verify-tag "$name"
@@ -73,6 +85,7 @@ jobs:
             echo "tag=$TAG"
             echo "version=$version"
             echo "sha=$sha"
+            echo "go-tag=$(git rev-parse "refs/tags/go/$TAG")"
           } >> "$GITHUB_OUTPUT"
 
   checks:
@@ -105,7 +118,6 @@ jobs:
       - name: Check crates.io
         id: registry
         run: |
-          set -euo pipefail
           status="$(curl --silent --show-error --retry 3 --output /dev/null --write-out '%{http_code}' \
             --user-agent "$GITHUB_REPOSITORY release" \
             "https://crates.io/api/v1/crates/git-remote-refs/$VERSION")"
@@ -147,7 +159,16 @@ jobs:
         if: steps.beepboop.outcome == 'success'
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || fromJSON(steps.credentials.outputs.values || '{}')['crates-io'] }}
-        run: cargo publish --locked --package git-remote-refs
+        shell: bash --noprofile --norc -uo pipefail {0}
+        run: |
+          output="$(cargo publish --locked --package git-remote-refs 2>&1)"
+          code=$?
+          echo "$output"
+          if (( code != 0 )) && [[ "$output" == *"already exists"* || "$output" == *"is already uploaded"* ]]; then
+            echo "::notice::crates.io already has git-remote-refs $VERSION"
+            code=0
+          fi
+          exit "$code"
 
       - uses: kjanat/beepboop/actions/report@6a16e1e7731247f029348aab8fa2e3e8990763ef # v1.10.20
         if: ${{ !cancelled() && steps.beepboop.outcome == 'success' }}
@@ -192,7 +213,6 @@ jobs:
       - name: Check npm
         id: registry
         run: |
-          set -euo pipefail
           status="$(curl --silent --show-error --retry 3 --output /dev/null --write-out '%{http_code}' \
             "https://registry.npmjs.org/git-remote-refs/$VERSION")"
           case "$status" in
@@ -220,7 +240,16 @@ jobs:
         id: oidc
         if: steps.beepboop.outcome == 'success'
         continue-on-error: true
-        run: npm publish "packages/git-remote-refs-$VERSION.tgz" --access public --ignore-scripts
+        shell: bash --noprofile --norc -uo pipefail {0}
+        run: |
+          output="$(npm publish "packages/git-remote-refs-$VERSION.tgz" --access public --ignore-scripts 2>&1)"
+          code=$?
+          echo "$output"
+          if (( code != 0 )) && [[ "$output" == *"cannot publish over the previously published versions"* ]]; then
+            echo "::notice::npm already has git-remote-refs $VERSION"
+            code=0
+          fi
+          exit "$code"
 
       - uses: kjanat/beepboop/actions/credentials@6a16e1e7731247f029348aab8fa2e3e8990763ef # v1.10.20
         id: credentials
@@ -234,7 +263,16 @@ jobs:
         if: steps.oidc.outcome == 'failure'
         env:
           NODE_AUTH_TOKEN: ${{ fromJSON(steps.credentials.outputs.values || '{}')['npm-token'] }}
-        run: npm publish "packages/git-remote-refs-$VERSION.tgz" --access public --ignore-scripts
+        shell: bash --noprofile --norc -uo pipefail {0}
+        run: |
+          output="$(npm publish "packages/git-remote-refs-$VERSION.tgz" --access public --ignore-scripts 2>&1)"
+          code=$?
+          echo "$output"
+          if (( code != 0 )) && [[ "$output" == *"cannot publish over the previously published versions"* ]]; then
+            echo "::notice::npm already has git-remote-refs $VERSION"
+            code=0
+          fi
+          exit "$code"
 
       - uses: kjanat/beepboop/actions/report@6a16e1e7731247f029348aab8fa2e3e8990763ef # v1.10.20
         if: ${{ !cancelled() && steps.beepboop.outcome == 'success' }}
@@ -272,6 +310,19 @@ jobs:
           name: packages
           path: packages
 
+      - name: Publish the go/ tag
+        env:
+          GO_TAG: ${{ needs.tag.outputs.go-tag }}
+        run: |
+          if current="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/go/$TAG" --jq .object.sha)"; then
+            if [[ "$current" != "$GO_TAG" ]]; then
+              echo "::error::go/$TAG points at $current instead of the verified tag object $GO_TAG"
+              exit 1
+            fi
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/go/$TAG" -f "sha=$GO_TAG"
+          fi
+
       - name: Fetch the Go module through the proxy
         run: |
           curl --silent --show-error --fail --retry 5 --retry-delay 10 --retry-all-errors \
@@ -279,7 +330,6 @@ jobs:
 
       - name: Publish the GitHub release
         run: |
-          set -euo pipefail
           git fetch --no-tags origin "+refs/tags/$TAG:refs/tags/$TAG"
           files=(packages/*.crate packages/*.tgz packages/git-remote-refs.component.wasm)
           if gh release view "$TAG" --json tagName; then

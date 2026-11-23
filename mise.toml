@@ -82,7 +82,7 @@ npm version "$version" --no-git-tag-version --allow-same-version --ignore-script
 '''
 
 [tasks.release]
-description = "Tag the version on master with signed v and go/v tags and push them"
+description = "Tag a version whose commit passed CI and push the tags"
 usage       = '''
 arg "<version>" help="Version in the manifests, without the v"
 arg "[summary]" help="Summary line for the tag message"
@@ -97,20 +97,40 @@ fail() {
   echo "error: $1" >&2
   exit 1
 }
+status() {
+  curl --silent --show-error --retry 3 --output /dev/null --write-out '%{http_code}' --user-agent "git-remote-refs release" "$1"
+}
+granted() {
+  beepboop secrets list --json | jq --exit-status --arg repo "$repo" --arg alias "$1" --arg environment "$2" \
+    'any(.grants[]; .repository == $repo and .alias == $alias and .operation == "release" and .environment == $environment)'
+}
 [[ "$(git branch --show-current)" == master ]] || fail "check out master first"
 git diff --quiet && git diff --cached --quiet || fail "commit or stash your changes first"
 git fetch --quiet origin master
-[[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/master)" ]] || fail "master differs from origin/master"
+sha="$(git rev-parse HEAD)"
+[[ "$sha" == "$(git rev-parse origin/master)" ]] || fail "master differs from origin/master"
 cargo="$(yq --input-format toml --output-format yaml '.workspace.package.version' Cargo.toml)"
 npm="$(jq --raw-output .version package.json)"
 [[ "$cargo" == "$version" && "$npm" == "$version" ]] || fail "Cargo.toml has $cargo and package.json has $npm, run mise run version $version and commit it"
 for name in "$tag" "go/$tag"; do
   ! git show-ref --quiet --verify "refs/tags/$name" || fail "$name exists locally"
-  [[ -z "$(git ls-remote --tags origin "refs/tags/$name")" ]] || fail "$name exists on origin"
 done
+[[ -z "$(git ls-remote origin "refs/tags/$tag" "refs/tags/go/$tag" "refs/pending/go/$tag")" ]] || fail "$tag or go/$tag exists on origin"
+repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+passed="$(gh api "repos/$repo/actions/workflows/ci.yml/runs?head_sha=$sha&status=success" --jq .total_count)"
+(( passed > 0 )) || fail "CI has not passed on $sha"
+[[ "$(status "https://crates.io/api/v1/crates/git-remote-refs/$version")" == 404 ]] || fail "crates.io already has git-remote-refs $version"
+[[ "$(status "https://registry.npmjs.org/git-remote-refs/$version")" == 404 ]] || fail "npm already has git-remote-refs $version"
+if [[ "$(status https://crates.io/api/v1/crates/git-remote-refs)" == 404 ]]; then
+  granted crates-io crates-io || fail "the first crates.io release needs: beepboop secrets grant $repo crates-io --operation release --environment crates-io"
+fi
+if [[ "$(status https://registry.npmjs.org/git-remote-refs)" == 404 ]]; then
+  granted npm-token npm || fail "the first npm release needs: beepboop secrets grant $repo npm-token --operation release --environment npm"
+fi
 message=("$tag")
 [[ -z "$summary" ]] || message+=("$summary")
 git tag --sign "$tag" --file <(printf '%s\n\n' "${message[@]}")
 git tag --sign "go/$tag" --file <(printf '%s\n\n' "${message[@]}")
-git push --atomic origin "refs/tags/$tag" "refs/tags/go/$tag"
+git verify-tag "$tag" "go/$tag"
+git push --atomic origin "refs/tags/$tag" "refs/tags/go/$tag:refs/pending/go/$tag"
 '''
