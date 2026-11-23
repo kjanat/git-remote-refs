@@ -16,4 +16,4 @@ git-remote-refs = { path = "../.." }
 wit-bindgen     = { version = "0.63.0", default-features = false, features = ["macros", "realloc"] }
 
 [dev-dependencies]
-wasmtime = { version = "50.0.1", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }
+wasmtime = { version = "51.0.0", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }
