@@ -46,7 +46,7 @@ cargo add git-remote-refs
 The crate is `no_std` with `alloc` and does no I/O. It builds each HTTP request and parses each response, and you send the requests with any client. Here `send` stands for that client and returns the status, content type and body:
 
 ```rust
-use git_remote_refs::{Discovery, Remote, Response, parse_discovery, parse_ls_refs, resolve};
+use git_remote_refs::{Discovery, Remote, Response, candidates, parse_discovery, parse_ls_refs, resolve};
 
 let remote = Remote::new("https://github.com/denoland/setup-deno.git")?;
 let (status, content_type, body) = send(remote.discovery_request())?;
@@ -54,7 +54,8 @@ let discovery = parse_discovery(&Response { status, content_type: content_type.a
 let refs = match discovery {
     Discovery::V0(refs) => refs,
     Discovery::V2(capabilities) => {
-        let prefixes = ["refs/heads/v2", "refs/tags/v2"];
+        let names = candidates("v2");
+        let prefixes: Vec<&str> = names.iter().map(String::as_str).collect();
         let (status, content_type, body) = send(remote.ls_refs_request(&capabilities, &prefixes)?)?;
         let response = Response { status, content_type: content_type.as_deref(), body: &body };
         parse_ls_refs(&capabilities, &response, &prefixes)?
