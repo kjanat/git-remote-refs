@@ -43,6 +43,16 @@ with a body'
 }
 
 build sha1 sha1 true
+
+# Give each moving ref an independent loose commit that can be pruned.
+moving=$root/moving.git
+git clone --quiet --bare "$root/sha1.git" "$moving"
+tree=$(git -C "$moving" rev-parse 'main^{tree}')
+for branch in moved pruned; do
+	oid=$(git -C "$moving" commit-tree "$tree" -m "$branch")
+	git -C "$moving" update-ref "refs/heads/$branch" "$oid"
+done
+
 build sha256 sha256 true
 build nofilter sha1 false
 git init --quiet --bare --initial-branch=main "$root/empty.git"

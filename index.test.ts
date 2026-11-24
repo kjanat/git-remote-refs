@@ -151,6 +151,59 @@ test('resolveObject fetches the exact object using one discovery', async () => {
 	await assert.rejects(resolveObject(repo('sha1'), '1'.repeat(40), { fetch }), { code: 'remote' });
 });
 
+test('resolveObject pins the advertised object when a branch moves', async () => {
+	const replacement = rev('moving', 'main');
+	for (const branch of ['moved', 'pruned']) {
+		const original = rev('moving', branch);
+		const git = (...args: string[]) => execFileSync('git', ['-C', `${root}/moving.git`, ...args], { env: environment });
+		let listings = 0;
+		const moving: Fetch = async (url, init) => {
+			const response = await fetch(url, init);
+			if (Buffer.from(bytes(init.body)).includes('command=ls-refs') && ++listings === 1) {
+				git('update-ref', `refs/heads/${branch}`, replacement);
+				if (branch === 'pruned') git('prune', '--expire=now');
+			}
+			return response;
+		};
+		const pending = resolveObject(repo('moving'), branch, { fetch: moving });
+		if (branch === 'pruned') {
+			await assert.rejects(pending, { code: 'remote' });
+		} else {
+			const { resolution, object } = await pending;
+			assert.equal(resolution.kind, 'ref');
+			assert.equal(resolution.ref.oid, original);
+			assert.equal(object?.oid, original);
+		}
+		assert.equal(listings, 1);
+	}
+});
+
+test('resolveObject releases its remote when fetch is cancelled', async t => {
+	const { Remote } = await import('./wasm/git_remote_refs_wasm.js');
+	const free = t.mock.method(Remote.prototype, 'free');
+	const controller = new AbortController();
+	const aborting: Fetch = (url, init) => {
+		if (Buffer.from(bytes(init.body)).includes('command=fetch')) {
+			controller.abort();
+			init.signal?.throwIfAborted();
+		}
+		return fetch(url, init);
+	};
+	await assert.rejects(resolveObject(repo('sha1'), 'main', { fetch: aborting, signal: controller.signal }), {
+		name: 'AbortError',
+	});
+	assert.equal(free.mock.callCount(), 1);
+});
+
+test('resolveObject propagates a fetch transport failure after a ref match', async () => {
+	const failure = new TypeError('connection lost');
+	const disconnecting: Fetch = (url, init) => {
+		if (Buffer.from(bytes(init.body)).includes('command=fetch')) throw failure;
+		return fetch(url, init);
+	};
+	await assert.rejects(resolveObject(repo('sha1'), 'main', { fetch: disconnecting }), error => error === failure);
+});
+
 test('getObject returns verified commits', async () => {
 	const commit = await getObject(repo('sha1'), rev('sha1', 'main').toUpperCase(), { fetch });
 	assert(commit.kind === 'commit');

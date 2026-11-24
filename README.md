@@ -23,13 +23,13 @@ const { resolution, object } = await resolveObject(repo, 'v2');
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | `listRefs(repo, { prefixes })` | Every advertised ref with its `oid`, `peeled` tag target and `symrefTarget`, plus unborn symrefs such as `HEAD` of an empty repo. |
 | `getRef(repo, name)`           | The ref with exactly this full name, or `undefined`.                                                                              |
-| `resolve(repo, name)`          | The ref Git's `rev-parse` would pick for a short name, or the object for a full object ID.                                        |
+| `resolve(repo, name)`          | The ref Git's `rev-parse` would pick for a short name, or the object for a full ID in the repository’s object format.             |
 | `resolveObject(repo, name)`    | The resolution and exact object, using one discovery request.                                                                     |
 | `getObject(repo, oid)`         | The commit, tag, tree or blob with this ID, checked against its hash.                                                             |
 | `peel(repo, oid)`              | The chain of tags from `oid` to the first object that is not a tag.                                                               |
 | `parseAdvertisement(bytes)`    | The refs in a saved `info/refs` response.                                                                                         |
 
-`resolveObject` sets `object` to `undefined` for a name with no match. A full object ID always resolves to `kind: 'object'`. If the server lacks that object, `resolveObject` rejects with `remote`. An annotated tag resolves to the tag object itself. Use `peel` to follow the tag to its target.
+`resolveObject` sets `object` to `undefined` for a name with no match. A full object ID in the repository’s object format resolves to `kind: 'object'`. If the server lacks that object, `resolveObject` rejects with `remote`. A full ID in a different object format is looked up as a ref name. An annotated tag resolves to the tag object itself. Use `peel` to follow the tag to its target.
 
 `resolve` tries `name`, `refs/name`, `refs/tags/name`, `refs/heads/name`, `refs/remotes/name` and `refs/remotes/name/HEAD` in that order. It returns `{ kind: 'ref', name, ref, others }`, `{ kind: 'object', oid, refs }` or `{ kind: 'not-found' }`. Revision syntax such as `v2^{}` fails with `invalid-ref-name`.
 
