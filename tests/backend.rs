@@ -1,6 +1,7 @@
 use git_remote_refs::{
     Capabilities, Discovery, Error, Fetched, Kind, Limits, Object, ObjectFormat, ObjectId, RefList,
-    Remote, Request, Resolution, Response, parse_discovery, parse_fetch, parse_ls_refs, resolve,
+    Remote, Request, Resolution, Response, candidates, parse_discovery, parse_fetch, parse_ls_refs,
+    resolve,
 };
 use std::collections::BTreeMap;
 use support::Reply;
@@ -122,6 +123,48 @@ fn prefixes_narrow_listing_and_coverage() {
     assert_eq!(
         remote("sha1").ls_refs_request(&capabilities, &["refs/tags/\nx"]),
         Err(Error::InvalidPrefix)
+    );
+}
+
+#[test]
+fn quickstart_resolves_with_candidate_prefixes() {
+    let remote = remote("sha1");
+    let capabilities = capabilities("sha1");
+    let list_candidates = |name: &str| {
+        let names = candidates(name);
+        let prefixes: Vec<_> = names.iter().map(String::as_str).collect();
+        let request = remote.ls_refs_request(&capabilities, &prefixes).unwrap();
+        let body = std::str::from_utf8(&request.body).unwrap();
+        let sent: Vec<_> = body
+            .lines()
+            .filter_map(|line| line.get(4..)?.strip_prefix("ref-prefix "))
+            .collect();
+        assert_eq!(sent.len(), 6);
+        assert_eq!(sent, prefixes);
+
+        let reply = exchange(&request, true);
+        parse_ls_refs(&capabilities, &reply.response(), &prefixes).unwrap()
+    };
+
+    let refs = list_candidates("v2");
+    assert_eq!(
+        refs.get("refs/heads/v2").unwrap().oid,
+        rev("sha1", "refs/heads/v2")
+    );
+    let Resolution::Ref {
+        name,
+        target,
+        others,
+    } = resolve(&refs, "v2").unwrap()
+    else {
+        panic!("expected tag and branch collision to resolve");
+    };
+    assert_eq!(name, "refs/tags/v2");
+    assert_eq!(target.oid, rev("sha1", "refs/tags/v2"));
+    assert_eq!(others, ["refs/heads/v2"]);
+    assert_eq!(
+        resolve(&list_candidates("missing"), "missing"),
+        Ok(Resolution::NotFound)
     );
 }
 
