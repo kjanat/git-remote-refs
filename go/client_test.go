@@ -359,6 +359,111 @@ func TestResolveObject(t *testing.T) {
 	}
 }
 
+func TestResolveObjectPinsAdvertisedOID(t *testing.T) {
+	ctx := context.Background()
+	replacement := rev(t, "moving", "main")
+	for _, branch := range []string{"moved", "pruned"} {
+		t.Run(branch, func(t *testing.T) {
+			dir, err := os.MkdirTemp(root, "moving-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			name := filepath.Base(dir) + "/repo"
+			path := filepath.Join(dir, "repo.git")
+			if err := os.CopyFS(path, os.DirFS(filepath.Join(root, "moving.git"))); err != nil {
+				t.Fatal(err)
+			}
+			original := rev(t, name, branch)
+			ref := "refs/heads/" + branch
+			var listings atomic.Int32
+			server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || isFetch(r) || listings.Add(1) != 1 {
+					backend.ServeHTTP(w, r)
+					return
+				}
+
+				listing := httptest.NewRecorder()
+				backend.ServeHTTP(listing, r)
+				runGit := func(args ...string) {
+					command := exec.Command("git", append([]string{"-C", path}, args...)...)
+					command.Env = append(os.Environ(), gitEnv...)
+					if out, err := command.CombinedOutput(); err != nil {
+						t.Errorf("git %v: %v: %s", args, err, out)
+					}
+				}
+				runGit("update-ref", ref, replacement)
+				if branch == "pruned" {
+					runGit("prune", "--expire=now")
+				}
+				respond(t, w, listing.Code, listing.Header().Get("Content-Type"), listing.Body.Bytes())
+			})
+			resolved, err := shared.ResolveObject(ctx, repo(server, name), branch)
+			if branch == "pruned" {
+				wantCode(t, err, CodeRemote, 0, "upload-pack: not our ref "+original)
+				if resolved != nil {
+					t.Fatalf("resolved = %#v, want nil after pruning %s", resolved, original)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if match, ok := resolved.Resolution.(*RefMatch); !ok || match.Name != ref || match.Ref.OID != original {
+					t.Fatalf("resolution = %#v, want %s at %s", resolved.Resolution, ref, original)
+				}
+				if commit, ok := resolved.Object.(*Commit); !ok || commit.OID != original {
+					t.Fatalf("object = %#v, want commit %s", resolved.Object, original)
+				}
+			}
+			if count := listings.Load(); count != 1 {
+				t.Fatalf("listings = %d, want 1", count)
+			}
+		})
+	}
+}
+
+func TestResolveObjectCancelledDuringFetch(t *testing.T) {
+	ctx := context.Background()
+	cancelled, cancel := context.WithCancel(ctx)
+	defer cancel()
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if isFetch(r) {
+			cancel()
+			<-r.Context().Done()
+			return
+		}
+		backend.ServeHTTP(w, r)
+	})
+	resolved, err := shared.ResolveObject(cancelled, repo(server, "sha1"), "main")
+	if resolved != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("ResolveObject = (%#v, %v), want (nil, context.Canceled)", resolved, err)
+	}
+	resolved, err = shared.ResolveObject(ctx, repo(v2, "sha1"), "main")
+	if err != nil || resolved == nil || resolved.Object == nil {
+		t.Fatalf("ResolveObject after cancellation = (%#v, %v)", resolved, err)
+	}
+}
+
+func TestResolveObjectFetchTransportFailure(t *testing.T) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if !isFetch(r) {
+			backend.ServeHTTP(w, r)
+			return
+		}
+		connection, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if err := connection.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	resolved, err := shared.ResolveObject(context.Background(), repo(server, "sha1"), "main")
+	if resolved != nil || !errors.Is(err, io.EOF) {
+		t.Fatalf("ResolveObject = (%#v, %v), want (nil, io.EOF)", resolved, err)
+	}
+}
+
 func TestGetObject(t *testing.T) {
 	ctx := context.Background()
 	main := rev(t, "sha1", "main")
