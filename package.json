@@ -39,7 +39,7 @@
 		"prepare": "mise i"
 	},
 	"devDependencies": {
-		"@types/node": "26.6.6"
+		"@types/node": "26.6.7"
 	},
 	"devEngines": {
 		"packageManager": {
