@@ -6,7 +6,7 @@ toolchain go1.27.4
 
 tool github.com/kjanat/wacogo/cmd/wacogo-witgen
 
-require github.com/kjanat/wacogo v0.3.4
+require github.com/kjanat/wacogo v0.3.9
 
 require (
 	github.com/coreos/go-semver v0.3.1 // indirect
