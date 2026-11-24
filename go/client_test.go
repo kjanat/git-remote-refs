@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/cgi"
 	"net/http/httptest"
@@ -461,6 +462,107 @@ func TestPeel(t *testing.T) {
 	wantCode(t, err, CodeLimitExceeded, 0, "tag chain longer than 16 objects")
 	_, err = shared.Peel(ctx, repo(v2, "sha1"), "abc")
 	wantCode(t, err, CodeInvalidObjectID, 0, "")
+}
+
+func TestResponseLimit(t *testing.T) {
+	const contentType = "application/x-git-upload-pack-advertisement"
+	advertisement := append(pkt([]byte("version 2\n")), "0000"...)
+	ctx := context.Background()
+	client, err := NewWithOptions(ctx, http.DefaultClient, ClientOptions{MaxResponseBytes: int64(len(advertisement))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := client.Close(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   []byte
+		code   Code
+		detail string
+	}{
+		{"exact", http.StatusOK, advertisement, CodeUnsupportedFeature, "ls-refs"},
+		{"oversized", http.StatusOK, append(bytes.Clone(advertisement), 'x'), CodeLimitExceeded, fmt.Sprintf("HTTP response exceeds %d bytes", len(advertisement))},
+		{"http error", http.StatusNotFound, append(bytes.Clone(advertisement), 'x'), CodeNotFound, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := serve(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", contentType)
+				w.WriteHeader(tc.status)
+				w.(http.Flusher).Flush()
+				if _, err := w.Write(tc.body); err != nil {
+					t.Error(err)
+				}
+			})
+			_, err := client.ListRefs(ctx, repo(server, "sha1"))
+			status := 0
+			if tc.status != http.StatusOK {
+				status = tc.status
+			}
+			wantCode(t, err, tc.code, status, tc.detail)
+		})
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+type responseLimitBody struct {
+	readErr  error
+	closeErr error
+	bytes    int
+	closed   bool
+}
+
+func (b *responseLimitBody) Read(p []byte) (int, error) {
+	clear(p)
+	b.bytes += len(p)
+	return len(p), b.readErr
+}
+
+func (b *responseLimitBody) Close() error {
+	b.closed = true
+	return b.closeErr
+}
+
+func TestResponseLimitWithBodyErrors(t *testing.T) {
+	readErr := errors.New("read failed after delivering bytes")
+	closeErr := errors.New("close failed")
+	body := &responseLimitBody{readErr: readErr, closeErr: closeErr}
+	s := &session{
+		ctx:              context.Background(),
+		maxResponseBytes: 5,
+		http: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: body, ContentLength: -1}, nil
+		})},
+	}
+	_, err := s.exchange(git.Request{URL: "https://example.com/repo"})
+	wantCode(t, err, CodeLimitExceeded, 0, "HTTP response exceeds 5 bytes")
+	if !errors.Is(err, readErr) || !errors.Is(err, closeErr) {
+		t.Fatalf("expected read and close errors, got %v", err)
+	}
+	if body.bytes != 6 || !body.closed {
+		t.Fatalf("read %d bytes, closed = %t", body.bytes, body.closed)
+	}
+}
+
+func TestResponseLimitOptions(t *testing.T) {
+	if shared.maxResponseBytes != defaultMaxResponseBytes {
+		t.Fatalf("default limit = %d, want %d", shared.maxResponseBytes, defaultMaxResponseBytes)
+	}
+	for _, limit := range []int64{-1, math.MaxInt64} {
+		client, err := NewWithOptions(context.Background(), http.DefaultClient, ClientOptions{MaxResponseBytes: limit})
+		want := fmt.Sprintf("git-remote-refs: invalid MaxResponseBytes: %d", limit)
+		if client != nil || err == nil || err.Error() != want {
+			t.Fatalf("NewWithOptions(%d) = %v, %v, want nil, %q", limit, client, err, want)
+		}
+	}
 }
 
 func TestErrors(t *testing.T) {

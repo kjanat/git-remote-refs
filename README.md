@@ -33,7 +33,7 @@ const { resolution, object } = await resolveObject(repo, 'v2');
 
 `resolve` tries `name`, `refs/name`, `refs/tags/name`, `refs/heads/name`, `refs/remotes/name` and `refs/remotes/name/HEAD` in that order. It returns `{ kind: 'ref', name, ref, others }`, `{ kind: 'object', oid, refs }` or `{ kind: 'not-found' }`. Revision syntax such as `v2^{}` fails with `invalid-ref-name`.
 
-Every function accepts `{ fetch, signal }` for a custom HTTP client and cancellation. Errors carry a `code`, such as `not-found`, `auth-required` or `remote`, and HTTP failures carry a `status`. GitHub answers `401` for a missing repository.
+Remote calls accept `{ fetch, signal, maxResponseBytes }` for a custom HTTP client, cancellation, and a per-response byte limit. Zero or an omitted limit selects 264 MiB. Errors carry a `code`, such as `not-found`, `auth-required` or `remote`, and HTTP failures carry a `status`. GitHub answers `401` for a missing repository.
 
 Names, emails and messages are decoded as UTF-8. Text that is not valid UTF-8 also comes with its original bytes in `nameBytes`, `emailBytes` or `messageBytes`.
 
@@ -95,6 +95,8 @@ if err != nil {
 ```
 
 The module is pure Go and needs no cgo. `Client` has `ListRefs`, `GetRef`, `Resolve`, `ResolveObject`, `GetObject`, `Peel` and `ParseAdvertisement`, which behave like their JavaScript counterparts. It is safe for concurrent use. Names, emails and messages hold the raw bytes from the object. Protocol failures are `*gitremoterefs.Error` values with a `Code`, a `Status` for HTTP failures and a `Detail`.
+
+The per-response byte limit defaults to 264 MiB. Set `ClientOptions.MaxResponseBytes` with `NewWithOptions` to change it.
 
 ## WebAssembly component
 
