@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "git-remote-refs"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "miniz_oxide",
  "sha1",
@@ -495,7 +495,7 @@ dependencies = [
 
 [[package]]
 name = "git-remote-refs-component"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "git-remote-refs",
  "wasmtime",
@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "git-remote-refs-wasm"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "git-remote-refs",
  "js-sys",
