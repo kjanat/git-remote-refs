@@ -13,11 +13,15 @@
 				"pkg:npm/git-remote-refs"
 			],
 			"credentials": ["crates-io", "npm-token"],
-			"workflows": {
-				"release": {
+			"promote": {
+				"publishWhen": "approved-in-beepboop",
+				"workflow": {
 					"file": "release.yml",
-					"mode": "observe",
-					"ref": "refs/tags/v*",
+					"refs": {
+						"phase": "version",
+						"prefix": "v",
+						"signed": true
+					},
 					"publications": [
 						"pkg:cargo/git-remote-refs",
 						"pkg:npm/git-remote-refs"

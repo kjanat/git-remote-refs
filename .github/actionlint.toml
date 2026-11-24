@@ -1,0 +1,11 @@
+#:schema https://cdn.jsdelivr.net/gh/kjanat/actionlint@d517adb1a17d8448608ff00dfd968a15180ef569/actionlint.schema.json
+#:tombi toml-version = "v1.1.0"
+
+plugins = ["github.com/kjanat/actionlint-plugin-shellcheck@v0.3.1", "github.com/kjanat/actionlint-plugin-ruff@v0.4.0"]
+
+[lint]
+enabled = true
+
+[lint.rules]
+preset  = "all"
+disable = ["unpinned-reference"]
