@@ -185,10 +185,9 @@ jobs:
           token: ${{ steps.token.outputs.token }}
           release-id: ${{ steps.draft.outputs.release-id }}
           assets: |
-            asset,displayname
-            packages/git-remote-refs-${{ needs.source.outputs.version }}.crate,Rust crate
-            packages/git-remote-refs-${{ needs.source.outputs.version }}.tgz,npm package
-            packages/git-remote-refs.component.wasm,WebAssembly component
+            {"asset": "packages/git-remote-refs-${{ needs.source.outputs.version }}.crate", "displayname": "Rust crate"}
+            {"asset": "packages/git-remote-refs-${{ needs.source.outputs.version }}.tgz", "displayname": "npm package"}
+            {"asset": "packages/git-remote-refs.component.wasm", "displayname": "WebAssembly component"}
 
       - uses: kjanat/beepboop/actions/publish-release@v1
         with: { execution-id: "${{ steps.beepboop.outputs.execution-id }}" }
