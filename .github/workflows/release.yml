@@ -67,7 +67,7 @@ jobs:
     timeout-minutes: 20
     environment:
       name: crates-io
-      url: https://crates.io/crates/git-remote-refs/${{ needs.source.outputs.version }}
+      url: ${{ steps.beepboop.outputs.publication-url }}
     permissions: { contents: read, id-token: write }
     env: { VERSION: "${{ needs.source.outputs.version }}" }
     steps:
@@ -106,7 +106,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: npm
-      url: https://www.npmjs.com/package/git-remote-refs/v/${{ needs.source.outputs.version }}
+      url: ${{ steps.beepboop.outputs.publication-url }}
     permissions: { contents: read, id-token: write }
     env: { VERSION: "${{ needs.source.outputs.version }}" }
     steps:
