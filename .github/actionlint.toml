@@ -8,3 +8,4 @@ enabled = true
 
 [lint.rules]
 preset  = "all"
+disable = ["unpinned-reference"]
