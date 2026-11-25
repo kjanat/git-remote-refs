@@ -177,10 +177,6 @@ jobs:
         env: { "${{ insert }}": "${{ fromJSON(steps.token.outputs.gitId || '{}') }}" }
         with: { token: "${{ steps.token.outputs.token }}" }
 
-      - name: Fetch the Go module through the proxy
-        run: curl --silent --show-error --fail --retry 5 --retry-delay 10 --retry-all-errors
-          "https://proxy.golang.org/github.com/kjanat/git-remote-refs/go/@v/${TAG}.info"
-
       - name: Upload release assets to the draft
         env: { GH_TOKEN: "${{ steps.token.outputs.token }}" }
         run: gh release upload "${TAG}" ./packages/*.crate ./packages/*.tgz ./packages/git-remote-refs.component.wasm --clobber
