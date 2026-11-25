@@ -152,7 +152,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions: { contents: read, id-token: write }
-    env: { TAG: "v${{ needs.source.outputs.version }}" }
     steps:
       - uses: kjanat/beepboop/actions/begin@v1
         id: beepboop
@@ -177,9 +176,19 @@ jobs:
         env: { "${{ insert }}": "${{ fromJSON(steps.token.outputs.gitId || '{}') }}" }
         with: { token: "${{ steps.token.outputs.token }}" }
 
-      - name: Upload release assets to the draft
-        env: { GH_TOKEN: "${{ steps.token.outputs.token }}" }
-        run: gh release upload "${TAG}" ./packages/*.crate ./packages/*.tgz ./packages/git-remote-refs.component.wasm --clobber
+      - uses: kjanat/beepboop/actions/draft-release@v1
+        id: draft
+        with: { token: "${{ steps.token.outputs.token }}" }
+
+      - uses: kjanat/beepboop/actions/upload-release-assets@v1
+        with:
+          token: ${{ steps.token.outputs.token }}
+          release-id: ${{ steps.draft.outputs.release-id }}
+          assets: |
+            asset,displayname
+            packages/git-remote-refs-${{ needs.source.outputs.version }}.crate,Rust crate
+            packages/git-remote-refs-${{ needs.source.outputs.version }}.tgz,npm package
+            packages/git-remote-refs.component.wasm,WebAssembly component
 
       - uses: kjanat/beepboop/actions/publish-release@v1
         with: { execution-id: "${{ steps.beepboop.outputs.execution-id }}" }
