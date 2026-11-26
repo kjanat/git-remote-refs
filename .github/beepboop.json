@@ -12,19 +12,58 @@
 				"pkg:cargo/git-remote-refs",
 				"pkg:npm/git-remote-refs"
 			],
-			"credentials": ["crates-io", "npm-token"],
-			"workflows": {
-				"release": {
+			"credentials": [
+				"crates-io",
+				"npm-token"
+			],
+			"promote": {
+				"publishWhen": "approved-in-beepboop",
+				"workflow": {
 					"file": "release.yml",
-					"mode": "observe",
-					"ref": "refs/tags/v*",
 					"publications": [
-						"pkg:cargo/git-remote-refs",
+						"pkg:cargo/git-remote-refs"
+					]
+				}
+			},
+			"workflows": {
+				"npm": {
+					"file": "release.yml",
+					"mode": "dispatch",
+					"needs": [
+						"promote"
+					],
+					"inputs": {
+						"release_operation": "npm"
+					},
+					"publications": [
 						"pkg:npm/git-remote-refs"
 					]
+				},
+				"github-release": {
+					"file": "release.yml",
+					"mode": "dispatch",
+					"needs": [
+						"npm"
+					],
+					"inputs": {
+						"release_operation": "github-release"
+					},
+					"publications": [
+						"github-release:kjanat/git-remote-refs"
+					],
+					"refs": {
+						"phase": "version",
+						"prefix": "v",
+						"signed": true
+					}
 				}
 			}
 		}
 	},
-	"managers": ["cargo", "go", "npm", "workflow"]
+	"managers": [
+		"cargo",
+		"go",
+		"npm",
+		"workflow"
+	]
 }

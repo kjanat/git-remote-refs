@@ -1,5 +1,10 @@
 # git-remote-refs
 
+[![GitHub release](https://img.shields.io/github/v/release/kjanat/git-remote-refs?logo=github&logoColor=white&label=release&labelColor=181717&color=black)](https://github.com/kjanat/git-remote-refs/releases/latest)
+[![Go module version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fproxy.golang.org%2Fgithub.com%2Fkjanat%2Fgit-remote-refs%2Fgo%2F%40latest&query=%24.Version&label=go&logo=go&logoColor=white&labelColor=00ADD8&color=black)](https://pkg.go.dev/github.com/kjanat/git-remote-refs/go)
+[![NPM](https://img.shields.io/npm/v/git-remote-refs?logo=npm&labelColor=CB3837&color=black)](https://npm.im/git-remote-refs)
+[![Crates.io](https://img.shields.io/crates/v/git-remote-refs?logo=rust&labelColor=B7410E&color=black)](https://crates.io/crates/git-remote-refs)
+
 Read refs and objects from a Git repository over smart HTTP, the way `git ls-remote` and `git fetch` do, without cloning it. It works with GitHub, GitLab, Gitea, Forgejo and any self-hosted Git server, and needs no credentials for public repositories.
 
 One Rust core ships four ways: an npm package, a Rust crate, a WebAssembly component and a Go module.
