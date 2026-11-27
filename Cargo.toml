@@ -19,14 +19,16 @@ sha1        = { version = "0.11.0", default-features = false }
 sha2        = { version = "0.11.1", default-features = false }
 
 [workspace]
-package.version    = "0.1.1"
-package.authors    = ["Kaj Kowalski"]
-package.edition    = "2024"
-package.readme     = "README.md"
-package.repository = "https://github.com/kjanat/git-remote-refs"
-package.license    = "MIT"
-resolver           = "3"
-members            = [".", "bindings/component", "bindings/wasm"]
+resolver = "3"
+members  = [".", "bindings/component", "bindings/wasm"]
+
+[workspace.package]
+version    = "0.1.1"
+authors    = ["Kaj Kowalski"]
+edition    = "2024"
+readme     = "README.md"
+repository = "https://github.com/kjanat/git-remote-refs"
+license    = "MIT"
 
 [profile.dev.package.cranelift-codegen]
 opt-level = 3
