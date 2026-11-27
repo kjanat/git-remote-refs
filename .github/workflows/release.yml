@@ -35,6 +35,8 @@ jobs:
       id-token: write
     outputs:
       version: ${{ fromJSON(steps.beepboop.outputs.context).version }}
+      artifact-id: ${{ steps.packages.outputs.id }}
+      artifact-run: ${{ steps.packages.outputs.run }}
       ref: ${{ fromJSON(steps.beepboop.outputs.context).sourceSha }}
     steps:
       - uses: kjanat/beepboop/actions/begin@v1
@@ -43,6 +45,14 @@ jobs:
           execution-id: ${{ inputs.beepboop_execution_id }}
           stream: git-remote-refs
           operation: ${{ inputs.release_operation }}
+
+      - name: Locate the tested packages
+        if: inputs.release_operation != 'promote'
+        id: packages
+        env:
+          CONTEXT_FILE: ${{ fromJSON(steps.beepboop.outputs.context).contextFile }}
+        run: |
+          jq -er '.resolvedInputs[] | select(.operation == "promote" and .output == "packages") | .artifact | "id=\(.id)\nrun=\(.runId)"' "${CONTEXT_FILE}" >> "${GITHUB_OUTPUT}"
 
       - name: Require a stable release version
         env:
@@ -54,6 +64,7 @@ jobs:
           fi
 
   checks:
+    if: inputs.release_operation == 'promote'
     name: Checks
     needs: source
     uses: $/.github/workflows/checks.yml
@@ -68,7 +79,7 @@ jobs:
     environment:
       name: crates-io
       url: ${{ steps.beepboop.outputs.publication-url }}
-    permissions: { contents: read, id-token: write }
+    permissions: { actions: read, contents: read, id-token: write }
     env: { VERSION: "${{ needs.source.outputs.version }}" }
     steps:
       - uses: kjanat/beepboop/actions/begin@v1
@@ -77,6 +88,20 @@ jobs:
           stream: git-remote-refs
           operation: promote
           execution-id: ${{ inputs.beepboop_execution_id }}
+
+      - name: Read the package artifact receipt
+        id: receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.checks.outputs.artifact-id }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}" \
+            --jq '"artifacts=" + ([{id, name, digest, runId: .workflow_run.id, expiresAt: .expires_at}] | tojson)' >> "${GITHUB_OUTPUT}"
+
+      - uses: kjanat/beepboop/actions/report@v1
+        with:
+          execution-id: ${{ steps.beepboop.outputs.execution-id }}
+          artifacts: ${{ steps.receipt.outputs.artifacts }}
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -101,13 +126,13 @@ jobs:
   npm:
     if: inputs.release_operation == 'npm'
     name: Publish to npm
-    needs: [source, checks]
+    needs: source
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
       name: npm
       url: ${{ steps.beepboop.outputs.publication-url }}
-    permissions: { contents: read, id-token: write }
+    permissions: { actions: read, contents: read, id-token: write }
     env: { VERSION: "${{ needs.source.outputs.version }}" }
     steps:
       - uses: kjanat/beepboop/actions/begin@v1
@@ -129,7 +154,12 @@ jobs:
           package-manager-cache: false
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with: { name: packages, path: packages }
+        with:
+          artifact-ids: ${{ needs.source.outputs.artifact-id }}
+          run-id: ${{ needs.source.outputs.artifact-run }}
+          github-token: ${{ github.token }}
+          path: packages
+          merge-multiple: true
 
       - name: Get the optional npm fallback token
         id: fallback
@@ -149,10 +179,10 @@ jobs:
   github-release:
     if: inputs.release_operation == 'github-release'
     name: Publish the GitHub release
-    needs: [source, checks]
+    needs: source
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions: { contents: read, id-token: write }
+    permissions: { actions: read, contents: read, id-token: write }
     steps:
       - uses: kjanat/beepboop/actions/begin@v1
         id: beepboop
@@ -171,7 +201,12 @@ jobs:
         with: { ref: "${{ needs.source.outputs.ref }}", persist-credentials: false }
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with: { name: packages, path: packages }
+        with:
+          artifact-ids: ${{ needs.source.outputs.artifact-id }}
+          run-id: ${{ needs.source.outputs.artifact-run }}
+          github-token: ${{ github.token }}
+          path: packages
+          merge-multiple: true
 
       - uses: kjanat/beepboop/actions/publish-refs@v1
         env: { "${{ insert }}": "${{ fromJSON(steps.token.outputs.gitId || '{}') }}" }
