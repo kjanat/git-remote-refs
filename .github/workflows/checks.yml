@@ -16,17 +16,14 @@ jobs:
     name: Test and package
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      MISE_ENABLE_TOOLS: node,npm,wasm-bindgen,tsrs,wasm-tools,go,cargo-binstall,cargo-nextest,golangci-lint
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
-      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
-        with:
-          cache: false
+      - uses: kjanat/mise-action@v6
+        with: { cache: false }
 
       - name: Install the Rust toolchain
         run: rustup toolchain install
@@ -42,16 +39,16 @@ jobs:
         run: mise run test
 
       - name: Package
+        env: { packages: &pkgs "${{ runner.temp }}/packages" }
         run: |
-          packages="$RUNNER_TEMP/packages"
-          mkdir -p "$packages"
+          mkdir -p "${packages}"
           cargo package --locked --package git-remote-refs
-          cp target/package/git-remote-refs-*.crate "$packages/"
-          npm pack --ignore-scripts --pack-destination "$packages"
-          cp go/git-remote-refs.wasm "$packages/git-remote-refs.component.wasm"
+          cp target/package/git-remote-refs-*.crate "${packages}/"
+          npm pack --ignore-scripts --pack-destination "${packages}"
+          cp go/git-remote-refs.wasm "${packages}/git-remote-refs.component.wasm"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packages
-          path: ${{ runner.temp }}/packages
+          path: *pkgs
           if-no-files-found: error
