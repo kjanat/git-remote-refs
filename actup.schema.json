@@ -1,0 +1,529 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ApiMode": {
+      "description": "API mode for fetching versions",
+      "oneOf": [
+        {
+          "description": "One batched GraphQL query for all repos. Fast, but needs an auth token.\n\n```toml\n[fetch]\napi_mode = \"graphql\"\n```",
+          "type": "string",
+          "const": "graphql"
+        },
+        {
+          "description": "Parallel REST requests, one per repo. Works without a token.\n\n```toml\n[fetch]\napi_mode = \"rest\"\n```",
+          "type": "string",
+          "const": "rest"
+        }
+      ]
+    },
+    "Archived": {
+      "description": "How the LSP reports an action whose repository is archived or disabled.",
+      "oneOf": [
+        {
+          "description": "A hint diagnostic with code `archived` and a hover warning.",
+          "type": "string",
+          "const": "hint"
+        },
+        {
+          "description": "No report.",
+          "type": "string",
+          "const": "ignore"
+        }
+      ]
+    },
+    "Branch": {
+      "description": "Branch handling policy.\n\n# Workflow Examples\n\n```yaml\n# With branch = \"ignore\" - branch refs skipped silently\n- uses: actions/checkout@main  # no warning, no update\n\n# With branch = \"warn\" - warns but doesn't change\n- uses: actions/checkout@main  # warning: consider pinning to a tag\n\n# With branch = \"update\" - pins branch to current HEAD SHA\n- uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # main\n```",
+      "oneOf": [
+        {
+          "description": "Ignore branch refs (don't flag as outdated).\n\n```yaml\n# With branch = \"ignore\"\n- uses: actions/checkout@main\n# No warning, no update - branch refs skipped\n```",
+          "type": "string",
+          "const": "ignore"
+        },
+        {
+          "description": "Warn about branch refs (recommend pinning to tag or SHA).\n\n```yaml\n# With branch = \"warn\"\n- uses: actions/checkout@main\n# Warning: 'main' is a branch ref, consider pinning to a tag\n```",
+          "type": "string",
+          "const": "warn"
+        },
+        {
+          "description": "Treat branch and non-semver tag refs as updatable (pin to their commit SHA).\n\n```yaml\n# Before:\n- uses: actions/checkout@main\n\n# After (branch = \"update\"):\n- uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # main\n# Branch pinned to current HEAD SHA\n```",
+          "type": "string",
+          "const": "update"
+        }
+      ]
+    },
+    "Cache": {
+      "description": "Cache configuration",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Whether caching is enabled",
+          "default": true,
+          "type": "boolean"
+        },
+        "path": {
+          "description": "Custom cache directory (None = use OS default)\n\nAn auto-discovered repo config cannot set it.",
+          "default": null,
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "ttl": {
+          "description": "Seconds a fetched answer stays fresh, on disk and in the memory of `actup-lsp` and `actup-mcp`",
+          "default": 86400,
+          "type": "integer",
+          "minimum": 0,
+          "format": "uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FetchSettings": {
+      "description": "Global fetch settings applied to all providers unless overridden per-host.\n\nVersions come from the git wire protocol, which needs no API and lists every\ntag. These settings govern the HTTP API fallback used when a host refuses a\ngit connection. Per-host overrides in `HostConfig` take precedence.",
+      "type": "object",
+      "properties": {
+        "api_mode": {
+          "$ref": "#/$defs/ApiMode",
+          "description": "Preferred API fallback mode: `\"graphql\"` (batched, requires auth) or `\"rest\"` (parallel).\n\nA provider that lacks the preferred mode, such as REST-only GitLab and\nGitea, uses the mode it supports.",
+          "default": "graphql"
+        },
+        "max_tags_per_repo": {
+          "description": "Maximum tags the API fallback fetches per repository (1–255).",
+          "default": 10,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255,
+          "format": "uint8"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostConfig": {
+      "description": "Per-host configuration for a single provider host.\n\nAll fields are optional: they act as overrides on top of provider preset\ndefaults and global `[fetch]` settings. After resolution, `kind`, `api_base`,\nand `token_env` must all be present (validated post-merge).\n\nUsed as values in the `[hosts.\"hostname\"]` config map.",
+      "type": "object",
+      "properties": {
+        "api_base": {
+          "description": "API base URL. Required after merge (may be inferred by provider registration).\nMust include scheme (`http://` or `https://`), no query or fragment.\nAn auto-discovered repo config cannot set it.",
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "api_mode": {
+          "description": "Override global `[fetch].api_mode` for this host.\n\nA mode the host's provider does not support is a config error.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApiMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "description": "Provider kind. Required for non-preset hosts; implied by preset for known hosts.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_tags_per_repo": {
+          "description": "Override global `[fetch].max_tags_per_repo` for this host.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 255,
+          "format": "uint8"
+        },
+        "token_env": {
+          "description": "Env var name for auth token. Required after merge (may be defaulted by preset).\nAn auto-discovered repo config cannot set it.",
+          "type": [
+            "null",
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostKind": {
+      "description": "Provider kind identifiers.\n\nEach variant corresponds to a provider crate that implements the [`Provider`](crate::Provider)\ntrait. Used for cache namespacing, registration lookup, and config validation.\n\nAdding a new provider requires adding a variant here **and** a provider crate.",
+      "oneOf": [
+        {
+          "description": "GitHub / GitHub Enterprise",
+          "type": "string",
+          "const": "github"
+        },
+        {
+          "description": "GitLab (gitlab.com or self-hosted)",
+          "type": "string",
+          "const": "gitlab"
+        },
+        {
+          "description": "Gitea / Forgejo",
+          "type": "string",
+          "const": "gitea"
+        }
+      ]
+    },
+    "MajorTag": {
+      "description": "Required relationship between a major tag and the selected release commit.",
+      "oneOf": [
+        {
+          "description": "Require the same commit. A descendant is a mismatch, never a downgrade.",
+          "type": "string",
+          "const": "exact"
+        },
+        {
+          "description": "Also accept a verified descendant of the selected release commit.",
+          "type": "string",
+          "const": "contains"
+        }
+      ]
+    },
+    "Override": {
+      "description": "One `[[overrides]]` entry.\n\n## Example\n```toml\n[[overrides]]\npattern = \"actions/*\"\npolicy  = { bump = \"major\" }\n\n[[overrides]]\npattern = \"ghe.corp.com/internal/*\"\npolicy  = { pin = \"sha\", track = \"exact\" }\n```",
+      "type": "object",
+      "required": [
+        "pattern"
+      ],
+      "properties": {
+        "pattern": {
+          "description": "Actions this entry applies to, as a `[host/]owner/repo[/subpath][@ref]` glob.",
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "#/$defs/PolicyOverride",
+          "description": "Policy keys to replace for matching actions.",
+          "default": {
+            "archived": null,
+            "branch": null,
+            "bump": null,
+            "major_tag": null,
+            "pin": null,
+            "prerelease": null,
+            "track": null
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Pin": {
+      "description": "The `[pin]` table.",
+      "type": "object",
+      "properties": {
+        "comment": {
+          "description": "Add a version label when writing a SHA pin (default: true).\n\nWhen false, omit generated labels and remove an existing recognized\nlabel while retaining its note. Unrelated comments stay unchanged.",
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Policy": {
+      "description": "The `[policy]` table.",
+      "type": "object",
+      "properties": {
+        "archived": {
+          "$ref": "#/$defs/Archived",
+          "description": "How the LSP reports an action whose repository is archived or disabled.\n\n`hint` (default) shows a hint diagnostic with code `archived` and a\nhover warning, `ignore` shows nothing.\n\n```toml\narchived = \"ignore\"   # no report for archived or disabled repositories\n```",
+          "default": "hint"
+        },
+        "branch": {
+          "$ref": "#/$defs/Branch",
+          "description": "How to handle floating branch refs like `@main` or `@v2`.\n\n`ignore` leaves them untouched (default), `warn` flags them as\nfloating, `update` pins the branch or non-semver tag to its current\ncommit SHA.\n\n```toml\nbranch = \"warn\"   # @main -> flagged, pin to a tag or SHA\n```",
+          "default": "ignore"
+        },
+        "bump": {
+          "$ref": "#/$defs/Update",
+          "description": "How far to bump outdated version refs.\n\n`patch` stays on `major.minor`, `minor` stays on `major`, `latest`\ntakes the newest version overall, and `major` is an alias of `latest`.\n\n```toml\nbump = \"minor\"   # v1.2.3 -> v1.5.0, never v2\n```",
+          "default": "latest"
+        },
+        "major_tag": {
+          "$ref": "#/$defs/MajorTag",
+          "description": "Relationship required between a major tag and the selected release.\n`exact` (default) requires equality; `contains` also accepts verified\ndescendants. Ahead or divergent refs are never automatically downgraded.",
+          "default": "exact"
+        },
+        "pin": {
+          "$ref": "#/$defs/Style",
+          "description": "How a ref is written when updating.\n\n`preserve` keeps the current style (tag stays a tag, SHA stays a SHA),\n`tag` rewrites to the version tag, `sha` pins to the commit SHA with a\n`# vX.Y.Z` comment. `update`, LSP quick fixes and fix-all apply it to\noutdated refs.\n\n**`tag` unpins:** an outdated SHA pin becomes its target's mutable tag.\n\n```toml\npin = \"sha\"   # actions/checkout@v4 -> @<sha> # v4.2.0\n```",
+          "default": "preserve"
+        },
+        "prerelease": {
+          "description": "Consider prerelease tags (e.g. `v2.0.0-rc.1`) when picking a target.\n\n```toml\nprerelease = false   # skip -rc/-beta tags unless already on one of that version\n```",
+          "default": false,
+          "type": "boolean"
+        },
+        "track": {
+          "$ref": "#/$defs/Track",
+          "description": "Version granularity of an updated tag ref.\n\n`keep` follows the current ref (`v4` -> `v6`, `v4.1.0` -> `v6.0.2`)\nand writes the full version when the major-only tag lags the target\ncommit, `major` writes the major-only tag when it points at the target commit\nand `bump` allows that whole major, `exact` always writes the full\nversion. `major_tag = \"contains\"` also permits verified descendants\nof the selected release when a major tag is eligible.\n\n```toml\ntrack = \"exact\"   # actions/checkout@v4 -> @v6.0.2\n```",
+          "default": "keep"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PolicyOverride": {
+      "description": "A partial `[policy]` table used by `[[overrides]]`.",
+      "type": "object",
+      "properties": {
+        "archived": {
+          "description": "Replaces `policy.archived`.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Archived"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "branch": {
+          "description": "Replaces `policy.branch`.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Branch"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bump": {
+          "description": "Replaces `policy.bump`.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Update"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "major_tag": {
+          "description": "Replaces `policy.major_tag`.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MajorTag"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pin": {
+          "description": "Replaces `policy.pin`.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Style"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prerelease": {
+          "description": "Replaces `policy.prerelease`.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "track": {
+          "description": "Replaces `policy.track`.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Track"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Scan": {
+      "description": "The `[scan]` table.",
+      "type": "object",
+      "properties": {
+        "extra_paths": {
+          "description": "Additional paths to scan (beyond defaults)\n\nBy default, actup scans:\n- `.github/workflows/*.{yml,yaml}` (workflows)\n- `action.{yml,yaml}` and `.github/actions/*/action.{yml,yaml}` (composite actions)\n\nUse `extra_paths` to scan additional locations. A directory that an\nentry matches expands to `*.{yml,yaml}` directly in it and\n`*/action.{yml,yaml}` below it.\n\nExamples:\n- `\".gitea/workflows\"` - Gitea workflow directory\n- `\".woodpecker/*.yml\"` - Woodpecker CI pipelines\n- `\"ci/pipelines/**/*.yaml\"` - Custom CI directory\n- `\".drone.yml\"` - Specific Drone CI config file\n- `\"infra/terraform/github-actions.tf\"` - GitHub Actions in Terraform\n\nA matched file is read by its extension. `.yml` and `.yaml` files are\nread as YAML. Markdown files (`.md`, `.markdown`) are read through\ntheir fenced `yaml` or `yml` blocks. Every other file is read line by\nline for `uses:` values that contain `@`, and actup never appends a\nversion comment to such a line.\n\nAn auto-discovered repo config cannot set it.\n\nEach entry is relative to the scan root. Absolute paths and `..`\nsegments are rejected, and matches that resolve outside the scan root\nthrough a symlink are skipped.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ignore": {
+          "description": "Actions to skip, as `[host/]owner/repo[/subpath][@ref]` globs.\n\nExamples:\n- `\"actions/checkout\"` - ignores all refs of this action\n- `\"actions/checkout@v2\"` - ignores only the v2 ref\n- `\"my-org/*\"` - ignores all actions from my-org\n- `\"ghe.corp.com/*/*\"` - ignores every action on one host\n- `\"tool/action@1.91.0\"` - ignores specific version (e.g., MSRV pin)",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Style": {
+      "description": "How to format version references when updating.\n\n# Workflow Examples\n\n```yaml\n# With pin = \"preserve\" - keeps original format\n- uses: actions/checkout@v4      # stays as tag\n- uses: actions/checkout@abc123  # stays as SHA\n\n# With pin = \"tag\" - writes version tags, unpinning SHA pins\n- uses: actions/checkout@v4.1.1  # always a tag\n\n# With pin = \"sha\" - pins to commit SHA (most secure)\n- uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1\n```",
+      "oneOf": [
+        {
+          "description": "Keep the original style (tag stays tag, SHA stays SHA).\n\n```yaml\n# Before:\n- uses: actions/checkout@v4\n\n# After (pin = \"preserve\"):\n- uses: actions/checkout@v4.2.0\n# Tag format preserved\n```",
+          "type": "string",
+          "const": "preserve"
+        },
+        {
+          "description": "Always use version tags (v1.2.3).\n\n**This unpins.** An outdated SHA-pinned ref is rewritten to its target's\nmutable tag and its `# vX.Y.Z` comment is dropped. Set it only to move\noff SHA pins on purpose.\n\n```yaml\n# Before:\n- uses: actions/checkout@abc1234... # v4.1.0\n\n# After (pin = \"tag\"):\n- uses: actions/checkout@v4.2.0\n# SHA converted to tag\n```",
+          "type": "string",
+          "const": "tag"
+        },
+        {
+          "description": "Always pin to full commit SHA (most secure).\n\n```yaml\n# Before:\n- uses: actions/checkout@v4\n\n# After (pin = \"sha\"):\n- uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1\n# Tag pinned to full SHA with comment\n```",
+          "type": "string",
+          "const": "sha"
+        }
+      ]
+    },
+    "Track": {
+      "description": "Version granularity written for an updated tag ref.\n\n# Workflow Examples\n\n```yaml\n# With track = \"keep\" - granularity follows the current ref\n- uses: actions/checkout@v4      # -> v6\n- uses: actions/checkout@v4.1.0  # -> v6.0.2\n\n# With track = \"major\" - major-only tag when it points at the target commit\n- uses: actions/checkout@v4.1.0  # -> v6\n\n# With track = \"exact\" - always the full version\n- uses: actions/checkout@v4      # -> v6.0.2\n```",
+      "oneOf": [
+        {
+          "description": "Write the major-only tag for a major-only ref when it points at the target commit,\nelse the full version.",
+          "type": "string",
+          "const": "keep"
+        },
+        {
+          "description": "Write the major-only tag (`v6`) when it points at the target commit and `bump`\nallows that whole major, else the full version.",
+          "type": "string",
+          "const": "major"
+        },
+        {
+          "description": "Write the full version (`v6.0.2`).",
+          "type": "string",
+          "const": "exact"
+        }
+      ]
+    },
+    "Update": {
+      "description": "Update policy determines what version bumps are allowed.\n\n# Workflow Examples\n\n```yaml\n# With bump = \"patch\" (1.2.3 -> 1.2.4 only)\n- uses: actions/checkout@v4.1.0  # stays at v4.1.x\n\n# With bump = \"minor\" (1.2.x -> 1.3.x)\n- uses: actions/checkout@v4.1.0  # can update to v4.2.0\n\n# With bump = \"latest\" or its alias \"major\" (any newer version)\n- uses: actions/checkout@v2      # updates to v4\n```",
+      "oneOf": [
+        {
+          "description": "Only patch updates within same major.minor (1.2.3 -> 1.2.4).\n\n```yaml\n# Before:\n- uses: actions/checkout@v4.1.0\n\n# After (bump = \"patch\"):\n- uses: actions/checkout@v4.1.1\n```",
+          "type": "string",
+          "const": "patch"
+        },
+        {
+          "description": "Minor updates within same major (1.2.x -> 1.3.x).\n\n```yaml\n# Before:\n- uses: actions/checkout@v4.1.0\n\n# After (bump = \"minor\"):\n- uses: actions/checkout@v4.2.0\n```",
+          "type": "string",
+          "const": "minor"
+        },
+        {
+          "description": "Alias of `latest`: any newer version, across majors.\n\n```yaml\n# Before:\n- uses: actions/checkout@v2\n\n# After (bump = \"major\"):\n- uses: actions/checkout@v4\n```",
+          "type": "string",
+          "const": "major"
+        },
+        {
+          "description": "Any newer version, across majors.\n\n```yaml\n# Before:\n- uses: actions/checkout@v2\n\n# After (bump = \"latest\"):\n- uses: actions/checkout@v4\n```",
+          "type": "string",
+          "const": "latest"
+        }
+      ]
+    }
+  },
+  "title": "Actup configuration",
+  "description": "Configuration options for the GitHub Actions-like updater.\n\nMain configuration struct.\n\n# Example Configuration\n\n```toml\n# .actup.toml - Conservative security-focused config\n[policy]\nbump   = \"patch\"\npin    = \"sha\"\nbranch = \"warn\"\n\n# Result in workflow:\n# Before:\n# - uses: actions/checkout@v4\n# After:\n# - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1\n```\n\n```toml\n# .actup.toml - Permissive major-update config\n[policy]\nbump       = \"major\"\npin        = \"tag\"\ntrack      = \"exact\"\nprerelease = true\n\n# Result in workflow:\n# Before:\n# - uses: actions/checkout@v3\n# After:\n# - uses: actions/checkout@v4.2.0\n```\n\n```toml\n# .actup.toml - Selective ignore patterns and overrides\n[scan]\nignore = [\n  \"actions/checkout\",              # Ignore all refs of this action\n  \"my-org/*\",                      # Ignore all actions from my-org\n  \"dtolnay/rust-toolchain@1.91.0\", # Ignore specific MSRV version\n]\n\n[[overrides]]\npattern = \"ghe.corp.com/platform/*\"\npolicy  = { pin = \"sha\", bump = \"minor\" }\n\n# Result: dtolnay/rust-toolchain@stable is checked, @1.91.0 is ignored\n```",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "JSON schema URL for editors; actup ignores the value.\n\n```json\n{ \"$schema\": \"./schemas/actup-config.schema.json\" }\n```",
+      "writeOnly": true,
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "cache": {
+      "$ref": "#/$defs/Cache",
+      "description": "Version-cache settings (TTL, location, on/off).\n\n```toml\n[cache]\nttl = 86400        # re-check a repo at most once a day\nenabled = true\n```",
+      "default": {
+        "enabled": true,
+        "path": null,
+        "ttl": 86400
+      }
+    },
+    "default_host": {
+      "description": "Host used for bare `owner/repo` refs that carry no host prefix.\n\nAbsent resolves to `github.com` via the built-in preset. An\nauto-discovered repo config cannot set it.\n\n```toml\ndefault_host = \"github.com\"\n```",
+      "default": null,
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "fetch": {
+      "$ref": "#/$defs/FetchSettings",
+      "description": "API fallback settings, used only when the git protocol can't list a repo.\n\n```toml\n[fetch]\napi_mode = \"graphql\"       # or \"rest\"\nmax_tags_per_repo = 10\n```",
+      "default": {
+        "api_mode": "graphql",
+        "max_tags_per_repo": 10
+      }
+    },
+    "hosts": {
+      "description": "Per-host provider config, keyed by lowercase hostname.\n\nUsed for GitHub Enterprise, self-hosted GitLab/Gitea, and custom tokens.\n\n```toml\n[hosts.\"ghe.corp.internal\"]\nkind = \"github\"\napi_base = \"https://ghe.corp.internal/api/v3\"\ntoken_env = \"GHE_TOKEN\"\n```",
+      "default": {},
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/HostConfig"
+      }
+    },
+    "overrides": {
+      "description": "Ordered policy overrides; for each key, the last matching entry wins.\n\n```toml\n[[overrides]]\npattern = \"my-org/*\"\npolicy  = { pin = \"sha\" }\n\n[[overrides]]\npattern = \"my-org/legacy\"\npolicy  = { bump = \"patch\" }\n```",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Override"
+      }
+    },
+    "pin": {
+      "$ref": "#/$defs/Pin",
+      "description": "Formatting of SHA pins, shared by the CLI, editors, MCP and WASM.",
+      "default": {
+        "comment": true
+      }
+    },
+    "policy": {
+      "$ref": "#/$defs/Policy",
+      "description": "Update policy applied to every action unless an override matches.\n\n```toml\n[policy]\nbump  = \"minor\"\npin   = \"sha\"\ntrack = \"keep\"\n```",
+      "default": {
+        "archived": "hint",
+        "branch": "ignore",
+        "bump": "latest",
+        "major_tag": "exact",
+        "pin": "preserve",
+        "prerelease": false,
+        "track": "keep"
+      }
+    },
+    "scan": {
+      "$ref": "#/$defs/Scan",
+      "description": "Which files and actions to scan.\n\n```toml\n[scan]\nignore      = [\"my-org/*\"]\nextra_paths = [\".gitea/workflows\"]\n```",
+      "default": {
+        "extra_paths": [],
+        "ignore": []
+      }
+    }
+  },
+  "additionalProperties": false
+}

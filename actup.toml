@@ -1,0 +1,32 @@
+#:schema actup.schema.json
+#:tombi toml-version = "v1.1.0"
+
+[policy]
+bump       = "latest"
+pin        = "preserve"
+track      = "keep"
+major_tag  = "exact"
+branch     = "ignore"
+prerelease = false
+archived   = "hint"
+
+[pin]
+comment = true
+
+[scan]
+ignore      = [
+  # "kjanat/beepboop/*/*@v1",
+]
+extra_paths = []
+
+[[overrides]]
+pattern = "kjanat/beepboop/*/*"
+policy  = {
+  archived   = "hint",
+  branch     = "ignore",
+  bump       = "major",
+  major_tag  = "contains",
+  pin        = "tag",
+  prerelease = true,
+  track      = "major",
+}

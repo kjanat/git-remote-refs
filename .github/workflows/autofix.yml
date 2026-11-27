@@ -1,0 +1,35 @@
+name: autofix.ci
+
+on:
+  pull_request:
+    paths:
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - mise.toml
+      - rust-toolchain.toml
+
+permissions:
+  contents: read
+
+cache-mode: read
+
+jobs:
+  component:
+    if: github.event.pull_request.user.login == 'renovate[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env: { MISE_ENABLE_TOOLS: "wasm-tools,rust" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { ref: "${{ github.event.pull_request.head.sha }}", persist-credentials: false }
+
+      - uses: kjanat/mise-action@ba8cdde9e7e3d26d190654d59b29bfeef2fb285c # v6
+        with: { cache: false }
+
+      - run: mise run component:build
+
+      - name: Check that only the embedded component changed
+        run: test -z "$(git status --porcelain --untracked-files=all -- . ':(exclude)go/git-remote-refs.wasm')"
+
+      - uses: autofix-ci/action@c5b2d67aa2274e7b5a18224e8171550871fc7e4a # v1.3.4
+        with: { commit-message: "Rebuild the embedded Go component" }
