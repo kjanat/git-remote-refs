@@ -62,9 +62,9 @@ The legacy `mise run release` task pushes tags directly and bypasses this proces
    awaiting approval, use
    `mise exec -- beepboop runs publish <run-id> --sourceSha <reviewed-sha>`
    with the commit you reviewed.
-4. **Verify publication.** The promotion publishes the crate first. The npm
+4. **Verify publication.** The promotion builds and tests the packages once, records the GitHub Actions artifact in Beepboop, and publishes the crate. The npm
    operation follows, then the GitHub release operation publishes the refs,
-   uploads the crate, npm tarball, and component Wasm to the draft, and publishes
+   uploads the crate, npm tarball, and component Wasm from that same artifact to the draft, and publishes
    the release. Check the version on crates.io and npm, the Go module tag
    (`go/vX.Y.Z`), and the assets on the GitHub release (`vX.Y.Z`).
 
