@@ -1,27 +1,24 @@
 #:tombi toml-version = "v1.1.0"
 
 [tools]
-npm                                = "12"
-node                               = "26"
-cargo-binstall                     = "1.28.0"
-"github:wasm-bindgen/wasm-bindgen" = "0.2.130"
-"cargo:cargo-nextest"              = "0.9.152"
-"npm:tsrs"                         = "7.1.0-beta.tsrs5"
-wasm-tools                         = "1.263.0"
-go                                 = "1.27.4"
-golangci-lint                      = "2.15.0"
-"npm:@kjanat/fmt"                  = {
-  version               = "0.65.0",
-  trust_policy_excludes = ["@kprint/*", "@kjanat/*"],
-  allow_low_downloads   = true,
-}
-"npm:@kjanat/beepboop"             = {
-  version             = "0.7.2",
-  allow_low_downloads = true,
-  auto_update         = true,
-  lazy_bins           = "beepboop",
-  lazy                = true
-}
+beepboop       = "latest"
+cargo-binstall = "1.28.0"
+cargo-nextest  = "0.9.152"
+go             = "1.27.4"
+golangci-lint  = { version = "2.15.0", depends = "go" }
+kfmt           = "0.65.0"
+node           = "26"
+npm            = "12"
+tsrs           = "7.1.0-beta.tsrs5"
+wasm-bindgen   = "0.2.130"
+wasm-tools     = "1.263.0"
+
+[tool_alias]
+beepboop      = "npm:@kjanat/beepboop[allow_low_downloads=true,auto_update=true,lazy_bins=beepboop]"
+cargo-nextest = "cargo:cargo-nextest"
+kfmt          = "npm:@kjanat/fmt[trust_policy_excludes=true,allow_low_downloads=true]"
+tsrs          = "npm:tsrs"
+wasm-bindgen  = "github:wasm-bindgen/wasm-bindgen"
 
 [settings]
 experimental                        = true
@@ -35,26 +32,26 @@ component = "go/git-remote-refs.wasm"
 rustflags = "--remap-path-prefix={{env.HOME}}=~ --remap-path-prefix={{config_root}}=."
 
 [deps]
-npm.auto = true
 go.auto  = true
+npm.auto = true
 
 [tasks]
-jstest.run    = "node --test index.test.ts"
-jstypes.run   = "tsrs -p tsconfig.json"
-rstest.vars   = { cargo_locked = "{% if env.CI | default(value='false') == 'true' %} --locked{% endif %}" }
-rstest.run    = "cargo nextest run{{vars.cargo_locked}} --workspace"
+"go:generate" = { run = "go -C go generate ./..." }
 fmt           = { run = "kfmt", alias = ["f", "format"] }
 golint.run    = "golangci-lint run ./go/..."
 gotest.run    = "go test -race ./go/..."
-"go:generate" = { run = "go -C go generate ./..." }
+jstest.run    = "node --test index.test.ts"
+jstypes.run   = "tsrs -p tsconfig.json"
+rstest.run    = "cargo nextest run{{vars.cargo_locked}} --workspace"
+rstest.vars   = { cargo_locked = "{% if env.CI | default(value='false') == 'true' %} --locked{% endif %}" }
 
 [tasks.test]
 run     = [
-  { task = "jstypes" },
-  { task = "jstest" },
-  { task = "rstest" },
-  { task = "gotest" },
   { task = "golint" },
+  { task = "gotest" },
+  { task = "jstest" },
+  { task = "jstypes" },
+  { task = "rstest" },
 ]
 depends = ["build", "component:build"]
 
