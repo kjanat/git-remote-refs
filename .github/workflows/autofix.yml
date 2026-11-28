@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ github.event.pull_request.head.sha }}", persist-credentials: false }
 
-      - uses: kjanat/mise-action@ba8cdde9e7e3d26d190654d59b29bfeef2fb285c # v6
+      - uses: kjanat/mise-action@32193b1d2b2ae0b7d31b8ea6a73e227795b210d0 # v6
         with: { cache: false }
 
       - run: mise run component:build
