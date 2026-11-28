@@ -2,7 +2,7 @@
 
 [tools]
 beepboop       = "latest"
-cargo-binstall = "1.28.0"
+cargo-binstall = "1.29.0"
 cargo-nextest  = "0.9.152"
 go             = "1.27.4"
 golangci-lint  = { version = "2.15.0", depends = "go" }
